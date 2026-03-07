@@ -215,6 +215,38 @@ def test_silence_by_phone(mock_has_permission, mock_get_gather_url, make_twilio_
 
 @mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
 @mock.patch("apps.twilioapp.gather.get_gather_url")
+@mock.patch("apps.twilioapp.gather.AlertGroupPhoneCallRenderer.render")
+@pytest.mark.django_db
+def test_repeat_message_by_phone(mock_render, mock_has_permission, mock_get_gather_url, make_twilio_phone_call):
+    twilio_phone_call = make_twilio_phone_call
+
+    mock_has_permission.return_value = True
+    mock_get_gather_url.return_value = reverse("twilioapp:gather")
+    mock_render.return_value = "Repeated phone call message"
+
+    data = {
+        "CallSid": twilio_phone_call.sid,
+        "Digits": "4",
+        "AccountSid": "Because of mock_has_permission there are may be any value",
+    }
+
+    client = APIClient()
+    response = client.post(
+        reverse("twilioapp:gather"),
+        data=urlencode(MultiValueDict(data), doseq=True),
+        content_type="application/x-www-form-urlencoded",
+    )
+
+    content = response.content.decode("utf-8")
+    content = BeautifulSoup(content, features="xml").findAll(string=True)
+
+    assert response.status_code == 200
+    assert "Repeated phone call message" in content
+    assert any("Press 1 to acknowledge" in line and "4 to repeat this message" in line for line in content)
+
+
+@mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
+@mock.patch("apps.twilioapp.gather.get_gather_url")
 @pytest.mark.django_db
 def test_wrong_pressed_digit(mock_has_permission, mock_get_gather_url, make_twilio_phone_call):
     twilio_phone_call = make_twilio_phone_call

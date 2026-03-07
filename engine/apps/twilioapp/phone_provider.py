@@ -27,6 +27,7 @@ from apps.twilioapp.models import (
     TwilioVerificationSender,
 )
 from apps.twilioapp.status_callback import get_call_status_callback_url, get_sms_status_callback_url
+from settings.base import PHONE_CALL_ACTION_WAIT_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,9 @@ class TwilioPhoneProvider(PhoneProvider):
 
     def _message_to_twiml_gather(self, message: str) -> VoiceResponse:
         response = VoiceResponse()
-        gather = Gather(action=get_gather_url(), method="POST", num_digits=1)
+        gather = Gather(
+            action=get_gather_url(), method="POST",
+            num_digits=1, timeout=PHONE_CALL_ACTION_WAIT_TIMEOUT)
         gather.say(message)
         gather.pause(length=1)
         gather.say(get_alert_group_gather_instructions())

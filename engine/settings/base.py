@@ -1019,3 +1019,11 @@ SYNC_V2_PERIOD_SECONDS = getenv_integer("SYNC_V2_PERIOD_SECONDS", 240)
 SYNC_V2_BATCH_SIZE = getenv_integer("SYNC_V2_BATCH_SIZE", 500)
 
 AUDITED_ALERT_GROUP_MAX_RETRIES = getenv_integer("AUDITED_ALERT_GROUP_MAX_RETRIES", 1)
+
+# phone call message template
+ALERT_GROUP_PHONE_CALL_TEMPLATE = os.getenv("ALERT_GROUP_PHONE_CALL_TEMPLATE") or (
+    "You are invited to check an Alert Group from Grafana OnCall. "
+    "Alert via {integration_name} with title {title} triggered {alert_count} times"
+)
+PHONE_CALL_ALLOWED_REPEAT_MESSAGE_COUNT = getenv_integer("PHONE_CALL_ALLOWED_REPEAT_MESSAGE_COUNT", 0)
+PHONE_CALL_ACTION_WAIT_TIMEOUT = getenv_integer("PHONE_CALL_ACTION_WAIT_TIMEOUT", 5)

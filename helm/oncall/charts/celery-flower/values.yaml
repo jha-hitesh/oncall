@@ -1,0 +1,81 @@
+# Default values for celery-flower.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: mher/flower
+  tag: latest
+  pullPolicy: Always
+
+appName: ""
+
+service:
+  type: ClusterIP
+  port: 5555
+
+serviceMonitor:
+  enabled: false
+  annotations: {}
+  labels: {}
+  interval: 30s
+  scrapeTimeout: ""
+  path: /metrics
+  scheme: http
+  honorLabels: false
+  namespace: ""
+  relabelings: []
+  metricRelabelings: []
+
+# This gets put into the config map... and referenced for ingress so it's separate from the environment variable set itself...
+applicationPort: 5555
+
+celery:
+  brokerUrl: ""  # mandatory eg: redis://localhost:6379/0
+  resultBackend: "" # optional
+
+# Override command and args if needed.
+command: ["celery", "flower"]
+args:
+  # - --address=0.0.0.0
+  # - --port=5555
+# Add non-secret configs via key-value pairs that will get shoved into a config map and referenced via `envFrom`
+# use this to set arbitrary environment variables for Flower
+envVars: {}
+#  FLOWER_VARIABLE: value
+
+# Add other external secrets as necessary... just in case they're useful
+secretVars: {}
+#  FLOWER_VARIABLE: value
+
+ingress:
+  enabled: false
+  annotations: {}
+    # kubernetes.io/ingress.class: internal
+    # nginx.ingress.kubernetes.io/auth-signin: https://$host/oauth2/start
+    # nginx.ingress.kubernetes.io/auth-url: https://$host/oauth2/auth
+    # kubernetes.io/tls-acme: "true"
+    # ingress.kubernetes.io/force-ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-User, X-Auth-Request-Email
+  path: /
+  hosts: []
+  #  - flower.domain.tld
+  tls: []
+  #  - secretName: flower-domain.tld
+  #    hosts:
+  #      - flower.domain.tld
+
+resources: {}
+  # limits:
+  #  cpu: 100m
+  #  memory: 128Mi
+  # requests:
+  #  cpu: 100m
+  #  memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

@@ -280,6 +280,12 @@ notifications using Twilio, complete the following steps:
 1. Set `GRAFANA_CLOUD_NOTIFICATIONS_ENABLED` as **False** to ensure the Grafana OSS <-> Cloud connector is disabled.
 2. From your **OnCall** environment, select **Env Variables** and configure all variables starting with `TWILIO_`.
 
+Additionally you can provide below configs for finer control over call
+
+- `PHONE_CALL_ACTION_WAIT_TIMEOUT` - time in seconds to wait for user to take action over phone (default 5)
+- `PHONE_CALL_ALLOWED_REPEAT_MESSAGE_COUNT` - set this to 0 or 1 to enable/disable repeat message prompt during call (default 0)
+- `ALERT_GROUP_PHONE_CALL_TEMPLATE` - actual template used to render phone call message which recepient will hear, it's a python format string, available variables are `integration_name`, `title` and `alert_count` default is (Grafana OnCall Alert. You have {alert_count} triggered alerts on {integration_name} with title {title}.)
+
 ### Zvonok.com
 
 Grafana OnCall supports Zvonok.com phone call notifications delivery. To configure phone call notifications using
