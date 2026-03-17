@@ -2,7 +2,6 @@ import React, { useState, SyntheticEvent } from 'react';
 
 import { cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { LabelTag } from '@grafana/labels';
 import {
   Button,
   Icon,
@@ -34,6 +33,7 @@ import Emoji from 'react-emoji-render';
 import reactStringReplace from 'react-string-replace';
 
 import { Collapse } from 'components/Collapse/Collapse';
+import { ColoredLabelTag, toColoredLabelParts } from 'components/ColoredLabelTag/ColoredLabelTag';
 import { ExtensionLinkDropdown } from 'components/ExtensionLinkMenu/ExtensionLinkDropdown';
 import { FullPageError } from 'components/FullPageError/FullPageError';
 import { Block } from 'components/GBlock/Block';
@@ -387,7 +387,7 @@ class _IncidentPage extends React.Component<IncidentPageProps, IncidentPageState
                   tooltipContent={
                     <Stack direction="column" gap={StackSize.sm}>
                       {incident.labels.map((label) => (
-                        <LabelTag label={label.key.name} value={label.value.name} key={label.key.id} />
+                        <ColoredLabelTag {...toColoredLabelParts(label)} key={label.key.id} />
                       ))}
                     </Stack>
                   }
@@ -677,6 +677,26 @@ class _IncidentPage extends React.Component<IncidentPageProps, IncidentPageState
           return (
             <a href={`${PLUGIN_ROOT}/schedules/${entity.schedule?.pk}`} target="_blank" rel="noopener noreferrer">
               <Text underline>{entity.schedule?.title}</Text>
+            </a>
+          );
+        case 'google_calendar_event_link':
+          if (!entity.google_calendar_event_link?.url) {
+            return entity.google_calendar_event_link?.title || '{{google_calendar_event_link}}';
+          }
+
+          return (
+            <a href={entity.google_calendar_event_link.url} target="_blank" rel="noopener noreferrer">
+              <Text underline>{entity.google_calendar_event_link.title}</Text>
+            </a>
+          );
+        case 'slack_channel':
+          if (!entity.slack_channel?.url) {
+            return entity.slack_channel?.title || '{{slack_channel}}';
+          }
+
+          return (
+            <a href={entity.slack_channel.url} target="_blank" rel="noopener noreferrer">
+              <Text underline>{entity.slack_channel.title}</Text>
             </a>
           );
         case 'webhook':

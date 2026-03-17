@@ -1,4 +1,5 @@
 from unittest.mock import PropertyMock, patch
+from urllib.error import URLError
 
 import pytest
 
@@ -19,6 +20,20 @@ from apps.slack.tasks import (
 )
 from apps.slack.tests.conftest import build_slack_response
 from apps.user_management.models import Organization
+
+
+@pytest.mark.django_db
+def test_can_be_updated_returns_false_on_transport_error(
+    make_organization_with_slack_team_identity,
+    make_slack_user_group,
+):
+    _, slack_team_identity = make_organization_with_slack_team_identity()
+    user_group = make_slack_user_group(slack_team_identity=slack_team_identity)
+
+    with patch("apps.slack.client.SlackClient.usergroups_update", side_effect=URLError("ssl failure")) as mock_update:
+        assert user_group.can_be_updated is False
+
+    mock_update.assert_called_once_with(usergroup=user_group.slack_id)
 
 
 @pytest.mark.django_db

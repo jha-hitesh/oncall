@@ -3,11 +3,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { css, cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, useStyles2 } from '@grafana/ui';
-import { sanitize } from 'dompurify';
 import { LocationHelper } from 'helpers/LocationHelper';
 import { isUserActionAllowed, UserActions } from 'helpers/authorization/authorization';
 import { useForceUpdate, useQueryParams } from 'helpers/hooks';
 import { getItem, setItem } from 'helpers/localStorage';
+import { sanitize } from 'helpers/sanitize';
 import { observer } from 'mobx-react';
 
 import { PluginLink } from 'components/PluginLink/PluginLink';

@@ -29,6 +29,11 @@ class RelatedIncidentData(typing.TypedDict):
     incident_title: str
 
 
+class TimelineSlackChannelData(typing.TypedDict):
+    url: typing.Optional[str]
+    title: str
+
+
 class AlertGroupLogRecord(models.Model):
     alert_group: "AlertGroup"
     author: typing.Optional["User"]
@@ -65,7 +70,8 @@ class AlertGroupLogRecord(models.Model):
         TYPE_DIRECT_PAGING,
         TYPE_UNPAGE_USER,
         TYPE_RESTRICTED,
-    ) = range(26)
+        TYPE_SLACK_CHANNEL_CREATED,
+    ) = range(27)
 
     TYPES_SKIPPING_UPDATE_SIGNAL = (
         TYPE_DELETED,
@@ -118,6 +124,7 @@ class AlertGroupLogRecord(models.Model):
         (TYPE_DIRECT_PAGING, "Trigger direct paging escalation"),
         (TYPE_UNPAGE_USER, "Unpage a user"),
         (TYPE_RESTRICTED, "Restricted"),
+        (TYPE_SLACK_CHANNEL_CREATED, "Slack channel created"),
     )
 
     # Handlers should be named like functions.
@@ -169,7 +176,11 @@ class AlertGroupLogRecord(models.Model):
         ERROR_ESCALATION_TRIGGER_WEBHOOK_IS_DISABLED,
         ERROR_ESCALATION_DECLARE_INCIDENT_STEP_IS_NOT_ENABLED,
         ERROR_ESCALATION_INCIDENT_COULD_NOT_BE_DECLARED,
-    ) = range(22)
+        ERROR_ESCALATION_CREATE_CALENDAR_INVITE_STEP_IS_NOT_CONFIGURED,
+        ERROR_ESCALATION_CREATE_CALENDAR_INVITE_NO_RECIPIENTS,
+        ERROR_ESCALATION_CREATE_CALENDAR_INVITE_GOOGLE_CALENDAR_NOT_CONNECTED,
+        ERROR_ESCALATION_CREATE_CALENDAR_INVITE_FAILED,
+    ) = range(26)
 
     type = models.IntegerField(choices=TYPE_CHOICES)
 
@@ -240,6 +251,14 @@ class AlertGroupLogRecord(models.Model):
         "source_integration_name",
         "incident_id",
         "incident_title",
+        "invitees",
+        "google_calendar_event_link",
+        "google_calendar_event_title",
+        "google_calendar_meet_link",
+        "slack_channel_name",
+        "slack_channel_id",
+        "slack_team_id",
+        "slack_channel_reused",
     ]
 
     def _make_log_line_link(self, url, title, html=False, for_slack=False, substitute_with_tag=False):
@@ -260,6 +279,7 @@ class AlertGroupLogRecord(models.Model):
         escalation_chain = self.alert_group.channel_filter.escalation_chain if self.alert_group.channel_filter else None
         step_info = self.get_step_specific_info()
         related_incident = self.render_incident_data_from_step_info(organization, step_info)
+        slack_channel = self.render_slack_channel_data_from_step_info(step_info)
         escalation_chain_data = (
             {
                 "pk": escalation_chain.public_primary_key,
@@ -284,6 +304,14 @@ class AlertGroupLogRecord(models.Model):
             if step_info and "webhook_id" in step_info
             else None
         )
+        google_calendar_event_link = (
+            {
+                "title": step_info.get("google_calendar_event_title") or step_info.get("google_calendar_event_link"),
+                "url": step_info.get("google_calendar_event_link"),
+            }
+            if step_info and step_info.get("google_calendar_event_link")
+            else None
+        )
 
         sf = SlackFormatter(organization)
         action = sf.format(self.rendered_log_line_action(substitute_with_tag=True))
@@ -300,6 +328,8 @@ class AlertGroupLogRecord(models.Model):
             "escalation_chain": escalation_chain_data,
             "schedule": schedule,
             "webhook": webhook,
+            "google_calendar_event_link": google_calendar_event_link,
+            "slack_channel": slack_channel,
         }
         return result
 
@@ -351,6 +381,16 @@ class AlertGroupLogRecord(models.Model):
             result += "alert group registered"
         elif self.type == AlertGroupLogRecord.TYPE_RESTRICTED:
             result += self.reason
+        elif self.type == AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED:
+            slack_channel_name = (step_specific_info or {}).get("slack_channel_name", "")
+            slack_channel_text = f"#{slack_channel_name}"
+            if substitute_with_tag and self.render_slack_channel_data_from_step_info(step_specific_info):
+                slack_channel_text = "{{slack_channel}}"
+
+            if (step_specific_info or {}).get("slack_channel_reused"):
+                result += f"reused channel {slack_channel_text}"
+            else:
+                result += f"created slack channel {slack_channel_text}"
         elif self.type == AlertGroupLogRecord.TYPE_ROUTE_ASSIGNED:
             channel_filter = self.alert_group.channel_filter_with_respect_to_escalation_snapshot
             escalation_chain = self.alert_group.escalation_chain_with_respect_to_escalation_snapshot
@@ -450,8 +490,41 @@ class AlertGroupLogRecord(models.Model):
                 tag = "related_incident" if substitute_with_tag else False
                 incident_text = self._make_log_line_link(incident_link, incident_title, html, for_slack, tag)
                 result += self.reason + f": {incident_text}"
+            elif escalation_policy_step == EscalationPolicy.STEP_CREATE_CALENDAR_INVITE:
+                invitees = ""
+                if step_specific_info is not None:
+                    invitees = step_specific_info.get("invitees", "")
+                result += 'triggered step "Create Calender Invite'
+                if invitees:
+                    result += f' for {invitees}'
+                result += '"'
             else:
                 result += f'triggered step "{EscalationPolicy.get_step_display_name(escalation_policy_step)}"'
+        elif self.type == AlertGroupLogRecord.TYPE_ESCALATION_FINISHED:
+            if escalation_policy_step == EscalationPolicy.STEP_CREATE_CALENDAR_INVITE:
+                invitees = event_title = event_link = meet_link = ""
+                if step_specific_info is not None:
+                    invitees = step_specific_info.get("invitees", "")
+                    event_title = step_specific_info.get("google_calendar_event_title", "")
+                    event_link = step_specific_info.get("google_calendar_event_link", "")
+                    meet_link = step_specific_info.get("google_calendar_meet_link", "")
+                result += 'completed step "Create Calender Invite'
+                if invitees:
+                    result += f' for {invitees}'
+                result += '"'
+                response_parts = []
+                if event_title:
+                    response_parts.append(f"summary {event_title}")
+                elif event_link:
+                    response_parts.append(f"event link {event_link}")
+                if response_parts:
+                    result += f' with response: {" and ".join(response_parts)}'
+                if meet_link:
+                    result += f" and meet link {meet_link}"
+            elif self.reason:
+                result += self.reason
+            else:
+                result += "escalation finished"
         elif self.type == AlertGroupLogRecord.TYPE_SILENCE:
             if self.silence_delay is None:
                 result += f"silenced by {author_name} forever"
@@ -547,15 +620,24 @@ class AlertGroupLogRecord(models.Model):
             if step_specific_info is not None:
                 webhook_name = step_specific_info.get("webhook_name") or step_specific_info.get("custom_button_name")
                 trigger = step_specific_info.get("trigger")
+                response_log = step_specific_info.get("response_log", False)
             elif self.custom_button is not None:
                 webhook_name = f"`{self.custom_button.name}`"
+                response_log = False
+            else:
+                response_log = False
             if trigger is None and self.author:
                 trigger = f"{author_name}"
             else:
                 trigger = trigger or "escalation chain"
             tag = "webhook" if substitute_with_tag else False
             webhook_text = self._make_log_line_link(None, webhook_name, html, for_slack, tag)
-            result += f"outgoing webhook `{webhook_text}` triggered by {trigger}"
+            if response_log:
+                result += f"outgoing webhook `{webhook_text}` response"
+                if self.reason:
+                    result += f": {self.reason}"
+            else:
+                result += f"outgoing webhook `{webhook_text}` triggered by {trigger}"
 
         elif self.type == AlertGroupLogRecord.TYPE_FAILED_ATTACHMENT:
             if self.alert_group.slack_message is not None:
@@ -673,6 +755,22 @@ class AlertGroupLogRecord(models.Model):
                 result += "failed to declare an Incident"
                 if self.reason:
                     result += f": {self.reason}"
+            elif (
+                self.escalation_error_code
+                == AlertGroupLogRecord.ERROR_ESCALATION_CREATE_CALENDAR_INVITE_STEP_IS_NOT_CONFIGURED
+            ):
+                result += 'skipped escalation step "Create Calender Invite" because it is not configured'
+            elif self.escalation_error_code == AlertGroupLogRecord.ERROR_ESCALATION_CREATE_CALENDAR_INVITE_NO_RECIPIENTS:
+                result += 'skipped escalation step "Create Calender Invite" because no invitees matched the selection'
+            elif (
+                self.escalation_error_code
+                == AlertGroupLogRecord.ERROR_ESCALATION_CREATE_CALENDAR_INVITE_GOOGLE_CALENDAR_NOT_CONNECTED
+            ):
+                result += 'skipped escalation step "Create Calender Invite" because Google Calendar is not connected'
+            elif self.escalation_error_code == AlertGroupLogRecord.ERROR_ESCALATION_CREATE_CALENDAR_INVITE_FAILED:
+                result += 'failed to create "Create Calender Invite" event'
+                if self.reason:
+                    result += f": {self.reason}"
         return result
 
     def render_incident_data_from_step_info(
@@ -690,6 +788,22 @@ class AlertGroupLogRecord(models.Model):
         )
         incident_title = step_specific_info["incident_title"] or DEFAULT_BACKUP_TITLE
         return {"incident_link": incident_link, "incident_title": incident_title}
+
+    def render_slack_channel_data_from_step_info(
+        self, step_specific_info: dict
+    ) -> typing.Optional[TimelineSlackChannelData]:
+        if not step_specific_info or "slack_channel_name" not in step_specific_info:
+            return None
+
+        slack_channel_name = step_specific_info["slack_channel_name"]
+        slack_channel_id = step_specific_info.get("slack_channel_id")
+        slack_team_id = step_specific_info.get("slack_team_id")
+
+        slack_channel_url = None
+        if slack_channel_id and slack_team_id:
+            slack_channel_url = f"https://app.slack.com/client/{slack_team_id}/{slack_channel_id}"
+
+        return {"url": slack_channel_url, "title": f"#{slack_channel_name}"}
 
     def get_step_specific_info(self):
         step_specific_info = None

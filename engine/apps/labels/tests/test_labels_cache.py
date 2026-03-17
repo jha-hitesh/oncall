@@ -1,10 +1,6 @@
-from json import JSONDecodeError
-from unittest.mock import call, patch
-
 import pytest
 from django.utils import timezone
 
-from apps.labels.client import LabelsAPIClient, LabelsRepoAPIException
 from apps.labels.models import LabelKeyCache, LabelValueCache
 from apps.labels.tasks import update_instances_labels_cache, update_labels_cache
 from apps.labels.utils import LABEL_OUTDATED_TIMEOUT_MINUTES
@@ -24,8 +20,6 @@ def test_update_labels_cache_for_key(make_organization, make_label_key_and_value
         "key": {"id": label_key.id, "name": new_key_name},
         "values": [{"id": label_value1.id, "name": new_value1_name}, {"id": label_value2.id, "name": old_value2_name}],
     }
-    assert label_key.name != new_key_name
-    assert label_value1.name != new_value1_name
 
     update_labels_cache(label_data)
 
@@ -70,10 +64,6 @@ def test_update_labels_cache(make_organization, make_label_key_and_value, make_l
         },
     ]
 
-    assert label_key1.name != new_key1_name
-    assert label_value1_1.name != new_value1_1_name
-    assert label_value2_2.name != new_value2_2_name
-
     update_labels_cache(labels_data)
 
     for label_cache in (label_key1, label_key2, label_value1_1, label_value2_1, label_value2_2):
@@ -82,7 +72,6 @@ def test_update_labels_cache(make_organization, make_label_key_and_value, make_l
 
     assert label_key1.name == new_key1_name
     assert label_value1_1.name == new_value1_1_name
-
     assert label_key2.name == old_key2_name
     assert label_value2_1.name == old_value2_1_name
     assert label_value2_2.name == new_value2_2_name
@@ -96,22 +85,15 @@ def test_update_instances_labels_cache_recently_synced(
     alert_receive_channel = make_alert_receive_channel(organization)
     label_association = make_static_label_config(organization, alert_receive_channel)
 
+    update_instances_labels_cache(organization.id, [alert_receive_channel.id], alert_receive_channel._meta.model.__name__)
+
+    label_association.refresh_from_db()
     assert not label_association.key.is_outdated
     assert not label_association.value.is_outdated
 
-    with patch("apps.labels.client.LabelsAPIClient.get_label_by_key_id") as mock_get_label_by_key_id:
-        with patch("apps.labels.tasks.update_labels_cache.apply_async") as mock_update_cache:
-            update_instances_labels_cache(
-                organization.id, [alert_receive_channel.id], alert_receive_channel._meta.model.__name__
-            )
-    assert not mock_get_label_by_key_id.called
-    assert not mock_update_cache.called
-
 
 @pytest.mark.django_db
-def test_update_instances_labels_cache_outdated(
-    make_organization, make_alert_receive_channel, make_static_label_config
-):
+def test_update_instances_labels_cache_outdated(make_organization, make_alert_receive_channel, make_static_label_config):
     organization = make_organization()
     alert_receive_channel = make_alert_receive_channel(organization)
     label_association = make_static_label_config(organization, alert_receive_channel)
@@ -123,69 +105,24 @@ def test_update_instances_labels_cache_outdated(
     assert label_association.key.is_outdated
     assert label_association.value.is_outdated
 
-    label_option = {
-        "key": {"id": label_association.key.id, "name": label_association.key.name},
-        "values": [{"id": label_association.value.id, "name": label_association.value.name}],
-    }
+    update_instances_labels_cache(organization.id, [alert_receive_channel.id], alert_receive_channel._meta.model.__name__)
 
-    with patch(
-        "apps.labels.client.LabelsAPIClient.get_label_by_key_id", return_value=(label_option, None)
-    ) as mock_get_label_by_key_id:
-        with patch("apps.labels.tasks.update_label_option_cache.apply_async") as mock_update_cache:
-            update_instances_labels_cache(
-                organization.id, [alert_receive_channel.id], alert_receive_channel._meta.model.__name__
-            )
-    assert mock_get_label_by_key_id.called
-    assert mock_update_cache.called
-    assert mock_update_cache.call_args == call((label_option,))
-
-
-@pytest.mark.django_db
-def test_update_instances_labels_cache_error(make_organization, make_alert_receive_channel, make_static_label_config):
-    organization = make_organization()
-    alert_receive_channel = make_alert_receive_channel(organization)
-    label_association = make_static_label_config(organization, alert_receive_channel)
-    outdated_last_synced = timezone.now() - timezone.timedelta(minutes=LABEL_OUTDATED_TIMEOUT_MINUTES + 1)
-
-    LabelKeyCache.objects.filter(id=label_association.key_id).update(last_synced=outdated_last_synced)
-    LabelValueCache.objects.filter(id=label_association.value_id).update(last_synced=outdated_last_synced)
-
-    with patch(
-        "apps.labels.client.LabelsAPIClient.get_label_by_key_id", side_effect=LabelsRepoAPIException("test", "test")
-    ) as mock_get_label_by_key_id:
-        with patch("apps.labels.tasks.update_labels_cache.apply_async") as mock_update_cache:
-            update_instances_labels_cache(
-                organization.id, [alert_receive_channel.id], alert_receive_channel._meta.model.__name__
-            )
-    mock_get_label_by_key_id.assert_called_once_with(label_association.key_id)
-    mock_update_cache.assert_not_called()
+    label_association.refresh_from_db()
+    assert not label_association.key.is_outdated
+    assert not label_association.value.is_outdated
 
 
 @pytest.mark.django_db
 def test_get_or_create_label_key_cache_by_name(make_organization):
     organization = make_organization()
-    label_key_data = {"id": "testid", "name": "testname", "prescribed": False}
 
-    # test empty response from label repo (json decode error)
-    with patch.object(LabelsAPIClient, "get_label_by_key_name", side_effect=JSONDecodeError("test", "test", 0)):
-        label = LabelKeyCache.get_or_create_by_name(organization, label_key_data["name"])
-
-    assert label is None
-
-    # test label does not exist in labels repo
-    with patch.object(LabelsAPIClient, "get_label_by_key_name", side_effect=LabelsRepoAPIException("test", "test")):
-        label = LabelKeyCache.get_or_create_by_name(organization, label_key_data["name"])
-
-    assert label is None
-
-    # test label does not exist in cache
-    with patch.object(LabelsAPIClient, "get_label_by_key_name", return_value=({"key": label_key_data}, None)):
-        label = LabelKeyCache.get_or_create_by_name(organization, label_key_data["name"])
+    label = LabelKeyCache.get_or_create_by_name(organization, "testname")
 
     assert label is not None
+    assert label.name == "testname"
     assert LabelKeyCache.objects.filter(id=label.id).exists()
 
-    # test label exists in cache
-    label = LabelKeyCache.get_or_create_by_name(organization, label_key_data["name"])
-    assert label is not None
-    assert LabelKeyCache.objects.filter(id=label.id).exists()
+    existing = LabelKeyCache.get_or_create_by_name(organization, "testname")
+
+    assert existing is not None
+    assert existing.id == label.id

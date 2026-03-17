@@ -8,6 +8,7 @@ import { isUserActionAllowed, UserActions } from 'helpers/authorization/authoriz
 import { observer } from 'mobx-react';
 
 import { ChatOpsPage } from 'pages/settings/tabs/ChatOps/ChatOps';
+import { GoogleCalendarSettings } from 'pages/settings/tabs/GoogleCalendar/GoogleCalendarSettings';
 import { MainSettings } from 'pages/settings/tabs/MainSettings/MainSettings';
 import { AppFeature } from 'state/features';
 import { WithStoreProps } from 'state/types';
@@ -50,7 +51,9 @@ class Settings extends React.Component<SettingsPageProps, SettingsPageState> {
 
     const hasLiveSettings = store.hasFeature(AppFeature.LiveSettings);
     const hasCloudPage = store.hasFeature(AppFeature.CloudConnection);
+    const hasGoogleCalendarPage = store.hasFeature(AppFeature.GoogleOauth2);
     const showCloudPage = hasCloudPage && isUserActionAllowed(UserActions.OtherSettingsWrite);
+    const showGoogleCalendarPage = hasGoogleCalendarPage && isUserActionAllowed(UserActions.OtherSettingsWrite);
     const showLiveSettings = hasLiveSettings && isUserActionAllowed(UserActions.OtherSettingsRead);
 
     return (
@@ -62,6 +65,14 @@ class Settings extends React.Component<SettingsPageProps, SettingsPageState> {
             active={activeTab === SettingsPageTab.MainSettings.key}
             label={SettingsPageTab.MainSettings.value}
           />
+          {showGoogleCalendarPage && (
+            <Tab
+              key={SettingsPageTab.GoogleCalendar.key}
+              onChangeTab={() => onTabChange(SettingsPageTab.GoogleCalendar.key)}
+              active={activeTab === SettingsPageTab.GoogleCalendar.key}
+              label={SettingsPageTab.GoogleCalendar.value}
+            />
+          )}
           <Tab
             key={SettingsPageTab.ChatOps.key}
             onChangeTab={() => onTabChange(SettingsPageTab.ChatOps.key)}
@@ -132,6 +143,11 @@ const TabsContent = (props: TabsContentProps) => {
       {activeTab === SettingsPageTab.MainSettings.key && (
         <div>
           <MainSettings />
+        </div>
+      )}
+      {activeTab === SettingsPageTab.GoogleCalendar.key && (
+        <div>
+          <GoogleCalendarSettings />
         </div>
       )}
       {activeTab === SettingsPageTab.TeamsSettings.key && (

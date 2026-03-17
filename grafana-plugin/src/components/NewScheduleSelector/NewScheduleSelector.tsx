@@ -2,21 +2,26 @@ import React, { FC, useCallback, useState } from 'react';
 
 import { css } from '@emotion/css';
 import { Button, Drawer, Icon, Stack, useStyles2 } from '@grafana/ui';
-import { UserActions } from 'helpers/authorization/authorization';
 import { StackSize } from 'helpers/consts';
 
 import { Block } from 'components/GBlock/Block';
 import { Text } from 'components/Text/Text';
 import { ScheduleForm } from 'containers/ScheduleForm/ScheduleForm';
 import { WithPermissionControlTooltip } from 'containers/WithPermissionControl/WithPermissionControlTooltip';
+import { UserAction } from 'helpers/authorization/authorization';
 import { Schedule, ScheduleType } from 'models/schedule/schedule.types';
 
 interface NewScheduleSelectorProps {
   onHide: () => void;
   onCreate: (data: Schedule) => void;
+  scheduleManagementWriteAction: UserAction;
 }
 
-export const NewScheduleSelector: FC<NewScheduleSelectorProps> = ({ onHide, onCreate }) => {
+export const NewScheduleSelector: FC<NewScheduleSelectorProps> = ({
+  onHide,
+  onCreate,
+  scheduleManagementWriteAction,
+}) => {
   const [showScheduleForm, setShowScheduleForm] = useState<boolean>(false);
   const [type, setType] = useState<ScheduleType | undefined>();
   const styles = useStyles2(getStyles);
@@ -47,7 +52,7 @@ export const NewScheduleSelector: FC<NewScheduleSelectorProps> = ({ onHide, onCr
                   <Text type="secondary">Configure rotations and shifts directly in Grafana On-Call</Text>
                 </Stack>
               </Stack>
-              <WithPermissionControlTooltip userAction={UserActions.SchedulesWrite}>
+              <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
                 <Button variant="primary" icon="plus" onClick={getCreateScheduleClickHandler(ScheduleType.API)}>
                   Create
                 </Button>
@@ -65,9 +70,11 @@ export const NewScheduleSelector: FC<NewScheduleSelectorProps> = ({ onHide, onCr
                   <Text type="secondary">Import rotations and shifts from your calendar app</Text>
                 </Stack>
               </Stack>
-              <Button variant="secondary" icon="plus" onClick={getCreateScheduleClickHandler(ScheduleType.Ical)}>
-                Create
-              </Button>
+              <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
+                <Button variant="secondary" icon="plus" onClick={getCreateScheduleClickHandler(ScheduleType.Ical)}>
+                  Create
+                </Button>
+              </WithPermissionControlTooltip>
             </Stack>
           </Block>
           <Block bordered withBackground className={styles.block}>

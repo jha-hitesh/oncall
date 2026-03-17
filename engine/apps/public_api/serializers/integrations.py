@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from jinja2 import TemplateSyntaxError
@@ -67,7 +68,7 @@ class IntegrationTypeField(fields.CharField):
             raise BadRequest(detail="Invalid integration type")
         if has_legacy_prefix(data):
             raise BadRequest("This integration type is deprecated")
-        if data == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING:
+        if data == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING and not settings.FEATURE_ALLOW_DIRECT_PAGING_CREATION:
             raise BadRequest(detail="Direct paging integrations can't be created")
         return data
 

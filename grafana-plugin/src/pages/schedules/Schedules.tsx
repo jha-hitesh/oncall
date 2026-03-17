@@ -4,7 +4,7 @@ import { cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { Button, IconButton, LoadingPlaceholder, Stack, withTheme2 } from '@grafana/ui';
 import { LocationHelper } from 'helpers/LocationHelper';
-import { UserActions } from 'helpers/authorization/authorization';
+import { getScheduleManagementWriteUserAction } from 'helpers/authorization/authorization';
 import { PAGE, PLUGIN_ROOT, StackSize, TEXT_ELLIPSIS_CLASS } from 'helpers/consts';
 import { PropsWithRouter, withRouter } from 'helpers/hoc';
 import { observer } from 'mobx-react';
@@ -68,6 +68,9 @@ class _SchedulesPage extends React.Component<SchedulesPageProps, SchedulesPageSt
   render() {
     const { store, query } = this.props;
     const { showNewScheduleSelector, expandedRowKeys, scheduleIdToEdit } = this.state;
+    const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+      store.organizationStore.currentOrganization?.schedule_management_require_admin
+    );
 
     const { results, count, page_size } = store.scheduleStore.getSearchResult();
 
@@ -85,7 +88,7 @@ class _SchedulesPage extends React.Component<SchedulesPageProps, SchedulesPageSt
                   <Text type="secondary">View in timezone:</Text>
                   <UserTimezoneSelect onChange={this.refreshExpandedSchedules} />
                 </Stack>
-                <WithPermissionControlTooltip userAction={UserActions.SchedulesWrite}>
+                <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
                   <Button variant="primary" onClick={this.handleCreateScheduleClick}>
                     + New schedule
                   </Button>
@@ -129,6 +132,7 @@ class _SchedulesPage extends React.Component<SchedulesPageProps, SchedulesPageSt
         {showNewScheduleSelector && (
           <NewScheduleSelector
             onCreate={this.handleCreateSchedule}
+            scheduleManagementWriteAction={scheduleManagementWriteAction}
             onHide={() => {
               this.setState({ showNewScheduleSelector: false });
             }}
@@ -328,14 +332,18 @@ class _SchedulesPage extends React.Component<SchedulesPageProps, SchedulesPageSt
   }
 
   renderButtons = (item: Schedule) => {
+    const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+      this.props.store.organizationStore.currentOrganization?.schedule_management_require_admin
+    );
+
     return (
       /* Wrapper div for onClick event to prevent expanding schedule view on delete/edit click */
       <div onClick={(event: SyntheticEvent) => event.stopPropagation()}>
         <Stack>
-          <WithPermissionControlTooltip key="edit" userAction={UserActions.SchedulesWrite}>
+          <WithPermissionControlTooltip key="edit" userAction={scheduleManagementWriteAction}>
             <IconButton tooltip="Settings" name="cog" onClick={this.getEditScheduleClickHandler(item.id)} />
           </WithPermissionControlTooltip>
-          <WithPermissionControlTooltip key="edit" userAction={UserActions.SchedulesWrite}>
+          <WithPermissionControlTooltip key="edit" userAction={scheduleManagementWriteAction}>
             <WithConfirm>
               <IconButton tooltip="Delete" name="trash-alt" onClick={this.getDeleteScheduleClickHandler(item.id)} />
             </WithConfirm>

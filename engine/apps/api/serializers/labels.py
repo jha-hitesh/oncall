@@ -1,12 +1,20 @@
 from rest_framework import serializers
 
-from apps.labels.models import AssociatedLabel, LabelKeyCache, LabelValueCache
+from apps.labels.models import (
+    AssociatedLabel,
+    LabelKeyCache,
+    LabelValueCache,
+    get_default_label_key_color_code,
+    get_default_label_value_color_code,
+)
 from apps.labels.utils import is_labels_feature_enabled
 
 
 class LabelKeySerializer(serializers.ModelSerializer):
     id = serializers.CharField()
     prescribed = serializers.BooleanField(default=False)
+    is_managed_label = serializers.BooleanField(default=False)
+    color_code = serializers.RegexField(r"^#[0-9A-Fa-f]{6}$", default=get_default_label_key_color_code)
 
     class Meta:
         model = LabelKeyCache
@@ -14,12 +22,15 @@ class LabelKeySerializer(serializers.ModelSerializer):
             "id",
             "name",
             "prescribed",
+            "is_managed_label",
+            "color_code",
         )
 
 
 class LabelValueSerializer(serializers.ModelSerializer):
     id = serializers.CharField()
     prescribed = serializers.BooleanField(default=False)
+    color_code = serializers.RegexField(r"^#[0-9A-Fa-f]{6}$", default=get_default_label_value_color_code)
 
     class Meta:
         model = LabelValueCache
@@ -27,6 +38,7 @@ class LabelValueSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "prescribed",
+            "color_code",
         )
 
 

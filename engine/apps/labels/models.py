@@ -1,11 +1,11 @@
-import logging
 import typing
-from json import JSONDecodeError
+import uuid
 
+from django.conf import settings
 from django.db import models
+from django.db.models import Count
 from django.utils import timezone
 
-from apps.labels.client import LabelsAPIClient, LabelsRepoAPIException
 from apps.labels.tasks import update_label_pairs_cache
 from apps.labels.types import LabelPair
 from apps.labels.utils import LABEL_OUTDATED_TIMEOUT_MINUTES
@@ -13,10 +13,20 @@ from apps.labels.utils import LABEL_OUTDATED_TIMEOUT_MINUTES
 if typing.TYPE_CHECKING:
     from apps.user_management.models import Organization
 
-logger = logging.getLogger(__name__)
-
 MAX_KEY_NAME_LENGTH = 200
 MAX_VALUE_NAME_LENGTH = 200
+
+
+def get_default_label_key_color_code() -> str:
+    return settings.FEATURE_LABELS_KEY_DEFAULT_COLOR
+
+
+def get_default_label_value_color_code() -> str:
+    return settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR
+
+
+# Backward-compatible alias for older imports. New code should use key/value-specific helpers.
+DEFAULT_LABEL_COLOR_CODE = get_default_label_key_color_code()
 
 
 class LabelKeyCache(models.Model):
@@ -25,6 +35,8 @@ class LabelKeyCache(models.Model):
     organization = models.ForeignKey("user_management.Organization", on_delete=models.CASCADE)
     last_synced = models.DateTimeField(auto_now=True)
     prescribed = models.BooleanField(default=False, null=True)
+    is_managed_label = models.BooleanField(default=False)
+    color_code = models.CharField(max_length=7, default=get_default_label_key_color_code)
 
     @property
     def is_outdated(self) -> bool:
@@ -33,32 +45,52 @@ class LabelKeyCache(models.Model):
     @classmethod
     def get_or_create_by_name(cls, organization: "Organization", key_name: str) -> typing.Optional["LabelKeyCache"]:
         """
-        `get_or_create_by_name` tries to get label key with provided name from cache.
-        If there is no label key with this name in the cache - it tries to fetch it from the labels repo API.
+        `get_or_create_by_name` returns the existing label key or creates it in the local labels store.
         """
         label_key = cls.objects.filter(organization=organization, name=key_name).first()
         if label_key:
             return label_key
+        return cls.create_key(organization, key_name)
 
-        # fetch label key from labels repo
-        try:
-            label, _ = LabelsAPIClient(organization.grafana_url, organization.api_token).get_label_by_key_name(
-                label_key
-            )
-        except (LabelsRepoAPIException, JSONDecodeError) as e:
-            logger.error(f"Failed to get or create label key {key_name} for organization {organization.id}: {e}")
-            return None
-
-        # save labels key in cache
-        label_key = LabelKeyCache(
-            id=label["key"]["id"],
-            name=label["key"]["name"],
+    @classmethod
+    def create_key(
+        cls,
+        organization: "Organization",
+        name: str,
+        prescribed: bool = False,
+        is_managed_label: bool = False,
+        color_code: typing.Optional[str] = None,
+    ) -> "LabelKeyCache":
+        return cls.objects.create(
+            id=str(uuid.uuid4()),
+            name=name,
             organization=organization,
-            prescribed=label["key"]["prescribed"],
+            prescribed=prescribed,
+            is_managed_label=is_managed_label,
+            color_code=color_code or get_default_label_key_color_code(),
         )
-        label_key.save()
 
-        return label_key
+    def to_representation(self) -> dict[str, typing.Any]:
+        values_count = getattr(self, "values_count", None)
+        if values_count is None:
+            values_count = self.values.count()
+
+        return {
+            "id": self.id,
+            "name": self.name,
+            "prescribed": bool(self.prescribed),
+            "is_managed_label": self.is_managed_label,
+            "color_code": self.color_code,
+            "values_count": values_count,
+        }
+
+    def to_option_representation(self) -> dict[str, typing.Any]:
+        values = [value.to_representation() for value in self.values.all().order_by("name", "id")]
+        return {"key": self.to_representation(), "values": values}
+
+    @classmethod
+    def with_values_count(cls) -> models.QuerySet["LabelKeyCache"]:
+        return cls.objects.annotate(values_count=Count("values"))
 
 
 class LabelValueCache(models.Model):
@@ -67,10 +99,26 @@ class LabelValueCache(models.Model):
     key = models.ForeignKey("labels.LabelKeyCache", on_delete=models.CASCADE, related_name="values")
     last_synced = models.DateTimeField(auto_now=True)
     prescribed = models.BooleanField(default=False, null=True)
+    color_code = models.CharField(max_length=7, default=get_default_label_value_color_code)
 
     @property
     def is_outdated(self) -> bool:
         return timezone.now() - self.last_synced > timezone.timedelta(minutes=LABEL_OUTDATED_TIMEOUT_MINUTES)
+
+    @classmethod
+    def create_value(
+        cls, key: LabelKeyCache, name: str, prescribed: bool = False, color_code: typing.Optional[str] = None
+    ) -> "LabelValueCache":
+        return cls.objects.create(
+            id=str(uuid.uuid4()),
+            name=name,
+            key=key,
+            prescribed=prescribed,
+            color_code=color_code or get_default_label_value_color_code(),
+        )
+
+    def to_representation(self) -> dict[str, typing.Any]:
+        return {"id": self.id, "name": self.name, "prescribed": bool(self.prescribed), "color_code": self.color_code}
 
 
 class AssociatedLabel(models.Model):
@@ -119,10 +167,22 @@ class AssociatedLabel(models.Model):
             value_name = label_pair["value"]["name"]
             value_prescribed = label_pair["value"]["prescribed"]
 
-            label_key = LabelKeyCache(id=key_id, name=key_name, organization=organization, prescribed=key_prescribed)
+            label_key = LabelKeyCache(
+                id=key_id,
+                name=key_name,
+                organization=organization,
+                prescribed=key_prescribed,
+                color_code=label_pair["key"].get("color_code", get_default_label_key_color_code()),
+            )
             labels_keys.append(label_key)
 
-            label_value = LabelValueCache(id=value_id, name=value_name, key_id=key_id, prescribed=value_prescribed)
+            label_value = LabelValueCache(
+                id=value_id,
+                name=value_name,
+                key_id=key_id,
+                prescribed=value_prescribed,
+                color_code=label_pair["value"].get("color_code", get_default_label_value_color_code()),
+            )
             labels_values.append(label_value)
             associated_instance = {instance.labels.field.name: instance}
             labels_associations.append(

@@ -90,6 +90,19 @@ describe('generateMissingPermissionMessage', () => {
   });
 });
 
+describe('getScheduleManagementWriteUserAction', () => {
+  test('uses admin fallback when the schedule management flag is enabled', () => {
+    expect(auth.getScheduleManagementWriteUserAction(true)).toEqual({
+      permission: auth.UserActions.SchedulesWrite.permission,
+      fallbackMinimumRoleRequired: OrgRole.Admin,
+    });
+  });
+
+  test('uses the default schedules write action when the schedule management flag is disabled', () => {
+    expect(auth.getScheduleManagementWriteUserAction(false)).toEqual(auth.UserActions.SchedulesWrite);
+  });
+});
+
 describe('generatePermissionString', () => {
   test('it properly builds permission strings with prefixes', () => {
     expect(auth.generatePermissionString(auth.Resource.API_KEYS, auth.Action.READ, true)).toEqual(

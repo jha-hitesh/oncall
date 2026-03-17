@@ -13,7 +13,12 @@ from apps.alerts.grafana_alerting_sync_manager.grafana_alerting_sync import Graf
 from apps.alerts.models import AlertReceiveChannel
 from apps.base.messaging import get_messaging_backends
 from apps.integrations.legacy_prefix import has_legacy_prefix
-from apps.labels.models import LabelKeyCache, LabelValueCache
+from apps.labels.models import (
+    LabelKeyCache,
+    LabelValueCache,
+    get_default_label_key_color_code,
+    get_default_label_value_color_code,
+)
 from apps.labels.types import LabelKey
 from apps.user_management.models import Organization
 from common.api_helpers.custom_fields import TeamPrimaryKeyRelatedField
@@ -23,6 +28,16 @@ from common.jinja_templater import jinja_template_env
 
 from .integration_heartbeat import IntegrationHeartBeatSerializer
 from .labels import LabelsSerializerMixin
+
+SLACK_CUSTOM_CHANNEL_TEMPLATE_FIELDS = {
+    "slack_create_custom_channel_template": "create_custom_channel",
+    "slack_channel_payload_template": "channel_payload",
+}
+
+GOOGLE_CALENDAR_TEMPLATE_FIELDS = {
+    "google_calendar_title_template": "title",
+    "google_calendar_description_template": "description",
+}
 
 
 def _additional_settings_serializer_from_type(integration_type: str) -> serializers.Serializer:
@@ -88,12 +103,14 @@ class CustomLabelSerializer(serializers.Serializer):
         id = serializers.CharField()
         name = serializers.CharField()
         prescribed = serializers.BooleanField(default=False)
+        color_code = serializers.RegexField(r"^#[0-9A-Fa-f]{6}$", default=get_default_label_key_color_code, required=False)
 
     class CustomLabelValueSerializer(serializers.Serializer):
         # ID is null for templated labels. For such labels, the "name" value is a Jinja2 template.
         id = serializers.CharField(allow_null=True)
         name = serializers.CharField()
         prescribed = serializers.BooleanField(default=False)
+        color_code = serializers.RegexField(r"^#[0-9A-Fa-f]{6}$", default=get_default_label_value_color_code, required=False)
 
     key = CustomLabelKeySerializer()
     value = CustomLabelValueSerializer()
@@ -156,17 +173,17 @@ class IntegrationAlertGroupLabelsSerializer(serializers.Serializer):
 
         # build index of keys id to name and prescribed flag
         label_key_index = {
-            k.id: {"name": k.name, "prescribed": k.prescribed}
+            k.id: {"name": k.name, "prescribed": k.prescribed, "color_code": k.color_code}
             for k in LabelKeyCache.objects.filter(id__in=[label[0] for label in custom_labels]).only(
-                "id", "name", "prescribed"
+                "id", "name", "prescribed", "color_code"
             )
         }
 
         # build index of values id to name and prescribed flag
         label_value_index = {
-            v.id: {"name": v.name, "prescribed": v.prescribed}
+            v.id: {"name": v.name, "prescribed": v.prescribed, "color_code": v.color_code}
             for v in LabelValueCache.objects.filter(id__in=[label[1] for label in custom_labels if label[1]]).only(
-                "id", "name", "prescribed"
+                "id", "name", "prescribed", "color_code"
             )
         }
 
@@ -176,11 +193,15 @@ class IntegrationAlertGroupLabelsSerializer(serializers.Serializer):
                     "id": key_id,
                     "name": label_key_index[key_id]["name"],
                     "prescribed": label_key_index[key_id]["prescribed"],
+                    "color_code": label_key_index[key_id]["color_code"],
                 },
                 "value": {
                     "id": value_id if value_id else None,
                     "name": label_value_index[value_id]["name"] if value_id else typing.cast(str, template),
                     "prescribed": label_value_index[value_id]["prescribed"] if value_id else False,
+                    "color_code": label_value_index[value_id]["color_code"]
+                    if value_id
+                    else get_default_label_value_color_code(),
                 },
             }
             for key_id, value_id, template in custom_labels
@@ -193,14 +214,14 @@ class IntegrationAlertGroupLabelsSerializer(serializers.Serializer):
     ) -> AlertReceiveChannel.DynamicLabelsConfigDB:
         """
         Convert dynamic labels from API representation to the schema used by the JSONField on the model:
-        [[key.id, None, template(stored in value.name here)]].
+        [[key.id, value.id, None], [key.id, None, template(stored in value.name here)]].
         """
 
         return [
-            [label["key"]["id"], None, label["value"]["name"]]
+            [label["key"]["id"], label["value"]["id"], None]
+            if label["value"]["id"] is not None
+            else [label["key"]["id"], None, label["value"]["name"]]
             for label in custom_labels
-            if label["value"]["id"] is None
-            # value.id is not None for deprecated static labels, for dynamic labels it's always None
         ]
 
     @staticmethod
@@ -226,6 +247,7 @@ class IntegrationAlertGroupLabelsSerializer(serializers.Serializer):
                 name=label["key"]["name"],
                 prescribed=label["key"]["prescribed"],
                 organization=organization,
+                color_code=label["key"].get("color_code", get_default_label_key_color_code()),
             )
             for label in labels
         ]
@@ -236,6 +258,7 @@ class IntegrationAlertGroupLabelsSerializer(serializers.Serializer):
                 name=label["value"]["name"],
                 prescribed=label["value"]["prescribed"],
                 key_id=label["key"]["id"],
+                color_code=label["value"].get("color_code", get_default_label_value_color_code()),
             )
             for label in labels
             if label["value"]["id"]  # don't create LabelValueCache objects for templated labels
@@ -450,7 +473,10 @@ class AlertReceiveChannelSerializer(
         if integration is None or integration not in AlertReceiveChannel.WEB_INTEGRATION_CHOICES:
             raise BadRequest(detail="invalid integration")
 
-        if integration == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING:
+        if (
+            integration == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING
+            and not settings.FEATURE_ALLOW_DIRECT_PAGING_CREATION
+        ):
             raise BadRequest(detail="Direct paging integrations can't be created")
 
         return integration
@@ -469,8 +495,10 @@ class AlertReceiveChannelSerializer(
         return data
 
     def get_allow_delete(self, obj: "AlertReceiveChannel") -> bool:
-        # don't allow deleting direct paging integrations
-        return obj.integration != AlertReceiveChannel.INTEGRATION_DIRECT_PAGING
+        return (
+            obj.integration != AlertReceiveChannel.INTEGRATION_DIRECT_PAGING
+            or settings.FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION
+        )
 
     def get_alert_count(self, obj: "AlertReceiveChannel") -> int:
         return 0
@@ -630,6 +658,48 @@ class AlertReceiveChannelTemplatesSerializer(EagerLoadingMixin, serializers.Mode
             backend_templates.update(backend_updates)
             self.set_value(ret, ["messaging_backends_templates", backend_id], backend_templates)
 
+        if settings.FEATURE_SLACK_INTEGRATION_ENABLED and settings.FEATURE_SLACK_CHANNEL_CREATION_ENABLED:
+            slack_templates = {}
+            if self.instance and self.instance.messaging_backends_templates is not None:
+                slack_templates = self.instance.messaging_backends_templates.get("SLACK", {})
+
+            slack_template_updates = {}
+            for field_name, attr_name in SLACK_CUSTOM_CHANNEL_TEMPLATE_FIELDS.items():
+                value = data.get(field_name)
+                if value is not None:
+                    try:
+                        if value:
+                            jinja_template_env.from_string(value)
+                    except TemplateSyntaxError:
+                        errors[field_name] = "invalid template"
+                    else:
+                        slack_template_updates[attr_name] = value
+
+            slack_templates.update(slack_template_updates)
+            if slack_templates:
+                self.set_value(ret, ["messaging_backends_templates", "SLACK"], slack_templates)
+
+        if settings.GOOGLE_OAUTH2_ENABLED:
+            google_calendar_templates = {}
+            if self.instance and self.instance.messaging_backends_templates is not None:
+                google_calendar_templates = self.instance.messaging_backends_templates.get("GOOGLE_CALENDAR", {})
+
+            google_calendar_template_updates = {}
+            for field_name, attr_name in GOOGLE_CALENDAR_TEMPLATE_FIELDS.items():
+                value = data.get(field_name)
+                if value is not None:
+                    try:
+                        if value:
+                            jinja_template_env.from_string(value)
+                    except TemplateSyntaxError:
+                        errors[field_name] = "invalid template"
+                    else:
+                        google_calendar_template_updates[attr_name] = value
+
+            google_calendar_templates.update(google_calendar_template_updates)
+            if google_calendar_templates:
+                self.set_value(ret, ["messaging_backends_templates", "GOOGLE_CALENDAR"], google_calendar_templates)
+
         return errors
 
     def _handle_core_template_updates(self, data, ret):
@@ -679,6 +749,31 @@ class AlertReceiveChannelTemplatesSerializer(EagerLoadingMixin, serializers.Mode
                 field_name = f"{backend.slug}_{field}_template"
                 templates[field_name] = value
                 templates[f"{field_name}_is_default"] = is_default
+
+        if settings.FEATURE_SLACK_INTEGRATION_ENABLED and settings.FEATURE_SLACK_CHANNEL_CREATION_ENABLED:
+            for field_name, attr_name in SLACK_CUSTOM_CHANNEL_TEMPLATE_FIELDS.items():
+                value = None
+                is_default = False
+                if obj.messaging_backends_templates:
+                    value = obj.messaging_backends_templates.get("SLACK", {}).get(attr_name)
+                if not value:
+                    value = obj.get_default_template_attribute("slack", attr_name)
+                    is_default = True
+                templates[field_name] = value
+                templates[f"{field_name}_is_default"] = is_default
+
+        if settings.GOOGLE_OAUTH2_ENABLED:
+            for field_name, attr_name in GOOGLE_CALENDAR_TEMPLATE_FIELDS.items():
+                value = None
+                is_default = False
+                if obj.messaging_backends_templates:
+                    value = obj.messaging_backends_templates.get("GOOGLE_CALENDAR", {}).get(attr_name)
+                if not value:
+                    value = obj.get_default_template_attribute("google_calendar", attr_name)
+                    is_default = True
+                templates[field_name] = value
+                templates[f"{field_name}_is_default"] = is_default
+
         return templates
 
     def _get_core_templates(self, obj: "AlertReceiveChannel"):

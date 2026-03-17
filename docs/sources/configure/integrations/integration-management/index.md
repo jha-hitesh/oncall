@@ -90,6 +90,7 @@ Explore ways to customize the behavior of your alerts from a specific integratio
 - Customize alerting grouping, auto-resolution, and auto-acknowledge templates to tailor the alert behavior for your team.
 - Modify [Appearance templates](ref:appearance-templates) to customize how alert groups are displayed in various parts of Grafana OnCall, such as the UI, phone and
 SMS, email, notifications, etc.
+- Configure integration-specific templates for Slack custom channel creation and Google Calendar event rendering when those features are enabled.
 - Add routes to your integration to direct alerts to different users and teams based on labels or other data.
 - Connect your escalation chains to routes to ensure the right people are notified at the right time.
 - Send demo alerts to an integration to validate that routes, templates, and escalations are functioning as expected. Consider using `Debug Maintenance mode`
@@ -99,6 +100,17 @@ For detailed instructions, refer to:
 
 - [Integration templates](ref:integration-templates)
 - [Configure labels](ref:configure-labels)
+
+### Advanced integration options
+
+Depending on enabled features, an integration can also include:
+
+- **Integration labels** and alert group label mapping
+- **Slack custom channel templates** to decide whether an alert group should create a dedicated Slack channel and what
+  channel payload to send
+- **Google Calendar templates** to define calendar event title and description used by the `Create calendar invite` escalation step
+
+These settings are edited from the integration details page and use Jinja templating.
 
 ## Manage Maintenance Mode
 
@@ -142,6 +154,9 @@ To edit the name of an integration:
 1. Navigate to the **Integrations** tab, select an integration from the list of enabled integrations.
 1. Click the **three dots** next to the integration name and select **Integration settings**.
 1. Provide a new name, description, and team, and click **Save**.
+
+If direct paging integration creation is enabled for your installation, you can also create direct paging integrations
+from the **+ New integration** flow. Otherwise, direct paging remains a managed integration type used by manual paging workflows.
 
 ## Explore available integrations
 

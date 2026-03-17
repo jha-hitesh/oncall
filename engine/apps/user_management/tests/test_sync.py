@@ -76,10 +76,6 @@ def patched_grafana_api_client(organization, is_rbac_enabled_for_organization=(F
             {"enabled": True, "jsonData": {GRAFANA_INCIDENT_PLUGIN_BACKEND_URL_KEY: MOCK_GRAFANA_INCIDENT_BACKEND_URL}},
             None,
         )
-        mock_client_instance.get_grafana_labels_plugin_settings.return_value = (
-            {"enabled": True, "jsonData": {}},
-            None,
-        )
         mock_client_instance.check_token.return_value = (None, {"connected": True})
         mock_client_instance.is_rbac_enabled_for_organization.return_value = is_rbac_enabled_for_organization
 
@@ -230,6 +226,54 @@ def test_sync_teams_for_organization(make_organization, make_team, make_alert_re
         team=teams[2],
     )
     _assert_teams_direct_paging_integration_is_configured_properly(direct_paging_integration)
+
+
+@pytest.mark.django_db
+def test_sync_teams_for_organization_without_auto_create_direct_paging(
+    settings, make_organization, make_team, make_alert_receive_channel
+):
+    settings.FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS = False
+    organization = make_organization()
+    teams = tuple(make_team(organization, team_id=team_id) for team_id in (1, 2, 3))
+    direct_paging_integrations = tuple(
+        make_alert_receive_channel(organization, integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING, team=team)
+        for team in teams[:2]
+    )
+
+    api_teams = tuple(
+        {"id": team_id, "name": "Test", "email": "test@test.test", "avatarUrl": "test.test/test"}
+        for team_id in (2, 3, 4)
+    )
+
+    with patched_grafana_api_client(organization) as mock_grafana_api_client:
+        mock_grafana_api_client.get_teams.return_value = ({"teams": api_teams}, None)
+        sync_teams(mock_grafana_api_client, organization)
+
+    assert organization.teams.count() == 3
+    assert not organization.teams.filter(pk=teams[0].pk).exists()
+    assert not organization.alert_receive_channels.filter(pk=direct_paging_integrations[0].pk).exists()
+
+    updated_team = organization.teams.filter(pk=teams[1].pk).first()
+    assert updated_team is not None
+    assert updated_team.name == api_teams[0]["name"]
+    assert updated_team.email == api_teams[0]["email"]
+    assert organization.alert_receive_channels.filter(pk=direct_paging_integrations[1].pk).exists()
+
+    created_team = organization.teams.filter(team_id=api_teams[2]["id"]).first()
+    assert created_team is not None
+    assert created_team.team_id == api_teams[2]["id"]
+    assert created_team.name == api_teams[2]["name"]
+    assert not organization.alert_receive_channels.filter(
+        organization=organization,
+        integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING,
+        team=created_team,
+    ).exists()
+
+    assert not organization.alert_receive_channels.filter(
+        organization=organization,
+        integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING,
+        team=teams[2],
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -472,7 +516,7 @@ def test_sync_organization_lock(
 class TestSyncGrafanaLabelsPluginParams:
     __test__ = False
 
-    response: tuple
+    feature_enabled_for_all: bool
     expected_result: bool
 
 
@@ -480,17 +524,16 @@ class TestSyncGrafanaLabelsPluginParams:
 @pytest.mark.parametrize(
     "test_params",
     [
-        TestSyncGrafanaLabelsPluginParams(({"enabled": True, "jsonData": {}}, None), True),
-        TestSyncGrafanaLabelsPluginParams(({"enabled": True}, None), True),
-        TestSyncGrafanaLabelsPluginParams(({"enabled": False}, None), False),
+        TestSyncGrafanaLabelsPluginParams(True, True),
+        TestSyncGrafanaLabelsPluginParams(False, False),
     ],
 )
-def test_sync_grafana_labels_plugin(make_organization, test_params: TestSyncGrafanaLabelsPluginParams):
+def test_sync_grafana_labels_plugin(make_organization, settings, test_params: TestSyncGrafanaLabelsPluginParams):
     organization = make_organization()
+    settings.FEATURE_LABELS_ENABLED_FOR_ALL = test_params.feature_enabled_for_all
     organization.is_grafana_labels_enabled = False  # by default in tests it's true, so setting to false
 
     with patched_grafana_api_client(organization) as mock_grafana_api_client:
-        mock_grafana_api_client.return_value.get_grafana_labels_plugin_settings.return_value = test_params.response
         sync_organization(organization)
     organization.refresh_from_db()
     assert organization.is_grafana_labels_enabled is test_params.expected_result

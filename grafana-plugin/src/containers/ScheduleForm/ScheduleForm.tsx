@@ -2,7 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 
 import { css } from '@emotion/css';
 import { Button, Drawer, Field, Input, Switch, TextArea, Stack, useStyles2 } from '@grafana/ui';
-import { UserActions } from 'helpers/authorization/authorization';
+import { getScheduleManagementWriteUserAction } from 'helpers/authorization/authorization';
 import { openWarningNotification } from 'helpers/helpers';
 import { observer } from 'mobx-react';
 import { Controller, FormProvider, useForm, useFormContext } from 'react-hook-form';
@@ -39,7 +39,10 @@ export const ScheduleForm = observer((props: ScheduleFormProps) => {
 
   const store = useStore();
 
-  const { scheduleStore, userStore } = store;
+  const { scheduleStore, userStore, organizationStore } = store;
+  const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+    organizationStore.currentOrganization?.schedule_management_require_admin
+  );
 
   const data = useMemo(() => {
     return isNew ? { team: userStore.currentUser?.current_team, type } : prepareForEdit(scheduleStore.items[id]);
@@ -94,7 +97,7 @@ export const ScheduleForm = observer((props: ScheduleFormProps) => {
                 <Button variant="secondary" onClick={onHide}>
                   Cancel
                 </Button>
-                <WithPermissionControlTooltip userAction={UserActions.SchedulesWrite}>
+                <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
                   <Button type="submit">{id === 'new' ? 'Create' : 'Update'} Schedule</Button>
                 </WithPermissionControlTooltip>
               </Stack>

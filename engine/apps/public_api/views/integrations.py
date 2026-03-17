@@ -1,3 +1,4 @@
+from django.conf import settings
 from django_filters import rest_framework as filters
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
@@ -82,9 +83,11 @@ class IntegrationView(
         )
 
     def destroy(self, request, *args, **kwargs):
-        # don't allow deleting direct paging integrations
         instance = self.get_object()
-        if instance.integration == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING:
+        if (
+            instance.integration == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING
+            and not settings.FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION
+        ):
             raise BadRequest(detail="Direct paging integrations can't be deleted")
 
         return super().destroy(request, *args, **kwargs)

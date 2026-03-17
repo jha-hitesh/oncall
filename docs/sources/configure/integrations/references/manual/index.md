@@ -59,12 +59,15 @@ Click on **+ Escalation** on the **Alert groups** page to start creating a new a
 From there, you can configure the alert group to notify a particular team and optionally include additional users. Here are the inputs you need to fill in:
 
 - **Message**: Write a message to provide more details or instructions to those whom you are paging.
+- **Detailed description**: Add longer context for the alert group. This is useful when the short message should stay concise.
 - **Team**: Select the team you want to page. The team's
   [direct paging integration](#learn-the-flow-and-handle-warnings) will be used for notification. _Note_ that you will only
   see teams that have a "contactable" direct paging integration (ie. it has an escalation chain assigned to it, or has
   at least one Chatops integration connected to send notifications to).
 - **Users**: Include more users to the alert group. For each additional user, you can select a notification policy:
   [default or important](ref:notify).
+- **Dynamic labels**: If the selected team's direct paging integration defines label keys that require user input,
+  you will be prompted to choose values while creating the alert group.
 
 > The same feature is also available as [**/escalate**](ref:slack-escalate) Slack command.
 
@@ -86,6 +89,9 @@ will page them even if the alert group is silenced or acknowledged, but not if t
 When you pick a team to page, Grafana OnCall will automatically use the right direct paging integration for the team.
 "Direct paging" is a special kind of integration in Grafana OnCall that is unique per team and is used to send alerts
 to the team's ChatOps channels and start an appropriate escalation chain.
+
+If the direct paging integration has static labels configured, they are applied automatically.
+If it has dynamic label keys configured, the user creating the page must choose values for those keys before submitting.
 
 ## Set up direct paging for a team
 

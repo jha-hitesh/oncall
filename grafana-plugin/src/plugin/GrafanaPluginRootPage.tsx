@@ -21,6 +21,7 @@ import { IncidentsPage } from 'pages/incidents/Incidents';
 import { Insights } from 'pages/insights/Insights';
 import { IntegrationPage } from 'pages/integration/Integration';
 import { IntegrationsPage } from 'pages/integrations/Integrations';
+import { LabelsPage } from 'pages/labels/Labels';
 import { OutgoingWebhooksPage } from 'pages/outgoing_webhooks/OutgoingWebhooks';
 import { getMatchedPage, pages } from 'pages/pages';
 import { SchedulePage } from 'pages/schedule/Schedule';
@@ -116,7 +117,7 @@ export const Root = observer((props: AppRootProps) => {
           css`
             position: relative;
             flex-grow: 1;
-          `,
+          `
         )}
       >
         <RenderConditionally
@@ -142,6 +143,8 @@ export const Root = observer((props: AppRootProps) => {
                   <Route path=":id" element={<IntegrationPage query={query} />} />
                   <Route index element={<IntegrationsPage query={query} />} />
                 </Route>
+
+                <Route path="labels" element={<LabelsPage />} />
 
                 <Route path="escalations">
                   <Route path=":id" element={<EscalationChainsPage query={query} />} />

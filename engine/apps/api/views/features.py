@@ -15,8 +15,10 @@ from apps.labels.utils import is_labels_feature_enabled
 class Feature(enum.StrEnum):
     MSTEAMS = "msteams"
     SLACK = "slack"
+    SLACK_CHANNEL_CREATION = "slack_channel_creation"
     UNIFIED_SLACK = "unified_slack"
     TELEGRAM = "telegram"
+    EMAIL = "email"
     LIVE_SETTINGS = "live_settings"
     GRAFANA_CLOUD_NOTIFICATIONS = "grafana_cloud_notifications"
     GRAFANA_CLOUD_CONNECTION = "grafana_cloud_connection"
@@ -29,6 +31,7 @@ class Feature(enum.StrEnum):
     SERVICE_DEPENDENCIES = "service_dependencies"
     PERSONAL_WEBHOOK = "personal_webhook"
     MATTERMOST = "mattermost"
+    ALLOW_DIRECT_PAGING_CREATION = "allow_direct_paging_creation"
 
 
 class FeaturesAPIView(APIView):
@@ -39,7 +42,13 @@ class FeaturesAPIView(APIView):
 
     authentication_classes = (PluginAuthentication,)
 
-    @extend_schema(responses={status.HTTP_200_OK: resolve_type_hint(list[Feature])})
+    @extend_schema(
+        responses={
+            status.HTTP_200_OK: resolve_type_hint(
+                dict[str, list[Feature] | str]
+            )
+        }
+    )
     def get(self, request):
         data = self._get_enabled_features(request)
         return Response(data)
@@ -50,15 +59,22 @@ class FeaturesAPIView(APIView):
         if settings.FEATURE_SLACK_INTEGRATION_ENABLED:
             enabled_features.append(Feature.SLACK)
 
+        if settings.FEATURE_SLACK_INTEGRATION_ENABLED and settings.FEATURE_SLACK_CHANNEL_CREATION_ENABLED:
+            enabled_features.append(Feature.SLACK_CHANNEL_CREATION)
+
         if settings.UNIFIED_SLACK_APP_ENABLED:
             enabled_features.append(Feature.UNIFIED_SLACK)
 
         if settings.FEATURE_TELEGRAM_INTEGRATION_ENABLED:
             enabled_features.append(Feature.TELEGRAM)
 
+        if settings.FEATURE_EMAIL_INTEGRATION_ENABLED:
+            enabled_features.append(Feature.EMAIL)
+
         if settings.IS_OPEN_SOURCE:
             # Features below should be enabled only in OSS
-            enabled_features.append(Feature.GRAFANA_CLOUD_CONNECTION)
+            if settings.FEATURE_GRAFANA_CLOUD_CONNECTION_ENABLED:
+                enabled_features.append(Feature.GRAFANA_CLOUD_CONNECTION)
             if settings.FEATURE_LIVE_SETTINGS_ENABLED:
                 enabled_features.append(Feature.LIVE_SETTINGS)
             if live_settings.GRAFANA_CLOUD_NOTIFICATIONS_ENABLED:
@@ -84,4 +100,11 @@ class FeaturesAPIView(APIView):
         if settings.FEATURE_MATTERMOST_INTEGRATION_ENABLED:
             enabled_features.append(Feature.MATTERMOST)
 
-        return enabled_features
+        if settings.FEATURE_ALLOW_DIRECT_PAGING_CREATION:
+            enabled_features.append(Feature.ALLOW_DIRECT_PAGING_CREATION)
+
+        return {
+            "enabled_features": enabled_features,
+            "label_key_default_color": settings.FEATURE_LABELS_KEY_DEFAULT_COLOR,
+            "label_value_default_color": settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR,
+        }

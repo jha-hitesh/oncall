@@ -167,7 +167,6 @@ def test_update_user_google_calendar_settings(
         "oncall_schedules_to_consider_for_shift_swaps": schedule_public_primary_keys,
     }
 
-
 @override_settings(GRAFANA_CLOUD_NOTIFICATIONS_ENABLED=False)
 @pytest.mark.django_db
 def test_update_user_cant_change_email_and_username(

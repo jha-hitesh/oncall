@@ -271,6 +271,52 @@ def test_save_google_oauth2_settings(make_organization_and_user):
 
 
 @pytest.mark.django_db
+def test_save_google_oauth2_settings_long_tokens(make_organization_and_user):
+    _, user = make_organization_and_user()
+    access_token = "a" * 1024
+    refresh_token = "r" * 1024
+
+    user.save_google_oauth2_settings(
+        {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "sub": "google_user_id",
+            "scope": "scope",
+        }
+    )
+    user.refresh_from_db()
+
+    assert user.google_oauth2_user.access_token == access_token
+    assert user.google_oauth2_user.refresh_token == refresh_token
+
+
+@pytest.mark.django_db
+def test_save_google_oauth2_settings_without_refresh_token_preserves_existing_token(make_organization_and_user):
+    _, user = make_organization_and_user()
+
+    user.save_google_oauth2_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google_user_id",
+            "scope": "scope",
+        }
+    )
+    user.save_google_oauth2_settings(
+        {
+            "access_token": "access2",
+            "refresh_token": None,
+            "sub": "google_user_id",
+            "scope": "scope",
+        }
+    )
+    user.refresh_from_db()
+
+    assert user.google_oauth2_user.access_token == "access2"
+    assert user.google_oauth2_user.refresh_token == "refresh"
+
+
+@pytest.mark.django_db
 def test_reset_google_oauth2_settings(make_organization_and_user):
     _, user = make_organization_and_user()
 

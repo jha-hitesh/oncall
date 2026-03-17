@@ -18,6 +18,7 @@ from apps.api.serializers.escalation_policy import (
     EscalationPolicyUpdateSerializer,
 )
 from apps.auth_token.auth import PluginAuthentication
+from apps.labels.models import LabelKeyCache, get_default_label_key_color_code
 from apps.mobile_app.auth import MobileAppAuthTokenAuthentication
 from common.api_helpers.filters import (
     ModelChoicePublicPrimaryKeyFilter,
@@ -162,6 +163,9 @@ class EscalationPolicyView(
             if step == EscalationPolicy.STEP_DECLARE_INCIDENT and not grafana_declare_incident_enabled:
                 continue
 
+            if step == EscalationPolicy.STEP_CREATE_CALENDAR_INVITE and not settings.GOOGLE_OAUTH2_ENABLED:
+                continue
+
             choices.append(
                 {
                     "value": step,
@@ -204,10 +208,17 @@ class EscalationPolicyView(
         organization = self.request.auth.organization
         choices = []
         if organization.is_grafana_labels_enabled:
+            severity_color = (
+                LabelKeyCache.objects.filter(organization=organization, name="severity")
+                .values_list("color_code", flat=True)
+                .first()
+                or get_default_label_key_color_code()
+            )
             choices = [
                 {
                     "value": EscalationPolicy.SEVERITY_SET_FROM_LABEL,
                     "display_name": EscalationPolicy.SEVERITY_SET_FROM_LABEL_DISPLAY_VALUE,
+                    "color_code": severity_color,
                 }
             ]
         incident_client = IncidentAPIClient(organization.grafana_url, organization.api_token)

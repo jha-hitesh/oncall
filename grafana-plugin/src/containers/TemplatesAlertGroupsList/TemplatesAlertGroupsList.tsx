@@ -22,6 +22,7 @@ interface TemplatesAlertGroupsListProps {
   alertReceiveChannelId?: ApiSchemas['AlertReceiveChannel']['id'];
   outgoingwebhookId?: ApiSchemas['Webhook']['id'];
   heading?: string;
+  includeWebhookResponse?: boolean;
 
   onSelectAlertGroup?: (alertGroup: ApiSchemas['AlertGroup']) => void;
 
@@ -38,6 +39,7 @@ export const TemplatesAlertGroupsList = (props: TemplatesAlertGroupsListProps) =
     alertReceiveChannelId,
     outgoingwebhookId,
     templates,
+    includeWebhookResponse = false,
     onEditPayload,
     onSelectAlertGroup,
     onLoadAlertGroupsList,
@@ -103,9 +105,16 @@ export const TemplatesAlertGroupsList = (props: TemplatesAlertGroupsListProps) =
   const handleOutgoingWebhookResponseSelect = (response: OutgoingWebhookResponse) => {
     setSelectedTitle(response.timestamp);
 
-    setSelectedPayload(JSON.parse(response.event_data));
+    const parsedEventData = JSON.parse(response.event_data);
+    const payloadWithWebhookResponse = includeWebhookResponse
+      ? parsedEventData && typeof parsedEventData === 'object' && !Array.isArray(parsedEventData)
+        ? { ...parsedEventData, webhook_response: response.content }
+        : { payload: parsedEventData, webhook_response: response.content }
+      : parsedEventData;
 
-    onEditPayload(response.event_data);
+    setSelectedPayload(payloadWithWebhookResponse);
+
+    onEditPayload(JSON.stringify(payloadWithWebhookResponse));
   };
 
   if (selectedPayload) {

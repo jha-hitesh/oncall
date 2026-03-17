@@ -115,7 +115,10 @@ class LegacyAccessControlCompatiblePermission:
 
 
 LegacyAccessControlCompatiblePermissions = typing.List[LegacyAccessControlCompatiblePermission]
-RBACPermissionsAttribute = typing.Dict[str, LegacyAccessControlCompatiblePermissions]
+DynamicRBACPermissions = typing.Callable[[], LegacyAccessControlCompatiblePermissions]
+RBACPermissionsAttribute = typing.Dict[
+    str, typing.Union[LegacyAccessControlCompatiblePermissions, DynamicRBACPermissions]
+]
 RBACObjectPermissionsAttribute = typing.Dict[permissions.BasePermission, typing.List[str]]
 
 
@@ -225,6 +228,9 @@ class RBACPermission(permissions.BasePermission):
         SCHEDULES_WRITE = LegacyAccessControlCompatiblePermission(
             Resources.SCHEDULES, Actions.WRITE, LegacyAccessControlRole.EDITOR
         )
+        SCHEDULES_WRITE_ADMIN = LegacyAccessControlCompatiblePermission(
+            Resources.SCHEDULES, Actions.WRITE, LegacyAccessControlRole.ADMIN
+        )
         SCHEDULES_EXPORT = LegacyAccessControlCompatiblePermission(
             Resources.SCHEDULES, Actions.EXPORT, LegacyAccessControlRole.EDITOR
         )
@@ -290,13 +296,11 @@ class RBACPermission(permissions.BasePermission):
 
         # NOTE: we don't currently add the label delete permission here because we don't currently use this in OnCall
         LABEL_CREATE = LegacyAccessControlCompatiblePermission(
-            Resources.LABEL, Actions.CREATE, LegacyAccessControlRole.EDITOR, prefix=PluginID.LABELS
+            Resources.LABEL, Actions.CREATE, LegacyAccessControlRole.ADMIN
         )
-        LABEL_READ = LegacyAccessControlCompatiblePermission(
-            Resources.LABEL, Actions.READ, LegacyAccessControlRole.VIEWER, prefix=PluginID.LABELS
-        )
+        LABEL_READ = LegacyAccessControlCompatiblePermission(Resources.LABEL, Actions.READ, LegacyAccessControlRole.VIEWER)
         LABEL_WRITE = LegacyAccessControlCompatiblePermission(
-            Resources.LABEL, Actions.WRITE, LegacyAccessControlRole.EDITOR, prefix=PluginID.LABELS
+            Resources.LABEL, Actions.WRITE, LegacyAccessControlRole.ADMIN
         )
 
     # mypy complains about "Liskov substitution principle" here because request is `AuthenticatedRequest` object
@@ -317,13 +321,16 @@ class RBACPermission(permissions.BasePermission):
             rbac_permissions is not None
         ), f"Must define a {RBAC_PERMISSIONS_ATTR} dict on the ViewSet that is consuming the RBACPermission class"
 
-        action_required_permissions: typing.Optional[typing.List] = rbac_permissions.get(action, None)
+        action_required_permissions = rbac_permissions.get(action, None)
 
         # next check that the action in question is defined within the rbac_permissions dict attribute
         assert (
             action_required_permissions is not None
         ), f"""Each action must be defined within the {RBAC_PERMISSIONS_ATTR} dict on the ViewSet.
 \nIf an action requires no permissions, its value should explicitly be set to an empty list"""
+
+        if callable(action_required_permissions):
+            action_required_permissions = action_required_permissions()
 
         return user_is_authorized(request.user, action_required_permissions)
 
@@ -424,3 +431,9 @@ class IsStaff(permissions.BasePermission):
         if user and user.is_authenticated:
             return user.is_staff
         return False
+
+
+def get_schedule_management_write_permissions() -> LegacyAccessControlCompatiblePermissions:
+    if settings.SCHEDULE_MANAGEMENT_REQUIRE_ADMIN:
+        return [RBACPermission.Permissions.SCHEDULES_WRITE_ADMIN]
+    return [RBACPermission.Permissions.SCHEDULES_WRITE]

@@ -83,6 +83,14 @@
     },
     {
       "type": "page",
+      "name": "Labels",
+      "path": "/a/grafana-oncall-app/labels",
+      "role": "Viewer",
+      "action": "grafana-oncall-app.label:read",
+      "addToNav": true
+    },
+    {
+      "type": "page",
       "name": "Outgoing webhooks",
       "path": "/a/grafana-oncall-app/outgoing_webhooks",
       "role": "Viewer",
@@ -151,6 +159,10 @@
           { "action": "grafana-oncall-app.schedules:write" },
           { "action": "grafana-oncall-app.schedules:export" },
 
+          { "action": "grafana-oncall-app.label:read" },
+          { "action": "grafana-oncall-app.label:write" },
+          { "action": "grafana-oncall-app.label:create" },
+
           { "action": "grafana-oncall-app.chatops:read" },
           { "action": "grafana-oncall-app.chatops:write" },
           { "action": "grafana-oncall-app.chatops:update-settings" },
@@ -201,6 +213,8 @@
           { "action": "grafana-oncall-app.schedules:write" },
           { "action": "grafana-oncall-app.schedules:export" },
 
+          { "action": "grafana-oncall-app.label:read" },
+
           { "action": "grafana-oncall-app.chatops:read" },
           { "action": "grafana-oncall-app.chatops:write" },
 
@@ -233,6 +247,7 @@
           { "action": "grafana-oncall-app.integrations:read" },
           { "action": "grafana-oncall-app.escalation-chains:read" },
           { "action": "grafana-oncall-app.schedules:read" },
+          { "action": "grafana-oncall-app.label:read" },
           { "action": "grafana-oncall-app.chatops:read" },
           { "action": "grafana-oncall-app.outgoing-webhooks:read" },
           { "action": "grafana-oncall-app.maintenance:read" },
@@ -615,10 +630,6 @@
       },
       {
         "action": "plugins.app:access",
-        "scope": "plugins:id:grafana-labels-app"
-      },
-      {
-        "action": "plugins.app:access",
         "scope": "plugins:id:grafana-ml-app"
       },
       {
@@ -680,10 +691,10 @@
         "action": "users.roles:read",
         "scope": "users:*"
       },
-      { "action": "grafana-labels-app.label:read" },
-      { "action": "grafana-labels-app.label:write" },
-      { "action": "grafana-labels-app.label:create" },
-      { "action": "grafana-labels-app.label:delete" }
+      { "action": "grafana-oncall-app.label:read" },
+      { "action": "grafana-oncall-app.label:write" },
+      { "action": "grafana-oncall-app.label:create" },
+      { "action": "grafana-oncall-app.label:delete" }
     ]
   },
   "dependencies": {

@@ -2,6 +2,7 @@ import React from 'react';
 
 import { ServiceLabels } from '@grafana/labels';
 import { Button, Stack } from '@grafana/ui';
+import { UserActions, isUserActionAllowed } from 'helpers/authorization/authorization';
 import { GENERIC_ERROR } from 'helpers/consts';
 import { openErrorNotification } from 'helpers/helpers';
 
@@ -20,6 +21,7 @@ const DUPLICATE_ERROR = 'Duplicate values are not allowed';
 
 export const RouteLabelsDisplay: React.FC<RouteLabelsDisplayProps> = ({ labels, labelErrors, onChange }) => {
   const { labelsStore } = useStore();
+  const canManageLabels = isUserActionAllowed(UserActions.OnCallAdmin);
 
   const onLabelAdd = () => {
     onChange([
@@ -55,10 +57,10 @@ export const RouteLabelsDisplay: React.FC<RouteLabelsDisplayProps> = ({ labels, 
         value={labels}
         onLoadKeys={onLoadKeys}
         onLoadValuesForKey={onLoadValuesForKey}
-        onCreateKey={labelsStore.createKey}
-        onUpdateKey={labelsStore.updateKey}
-        onCreateValue={labelsStore.createValue}
-        onUpdateValue={labelsStore.updateKeyValue}
+        onCreateKey={canManageLabels ? labelsStore.createKey : undefined}
+        onUpdateKey={canManageLabels ? labelsStore.updateKey : undefined}
+        onCreateValue={canManageLabels ? labelsStore.createValue : undefined}
+        onUpdateValue={canManageLabels ? labelsStore.updateKeyValue : undefined}
         onUpdateError={(res) => {
           if (res?.response?.status === 409) {
             openErrorNotification(DUPLICATE_ERROR);
@@ -74,7 +76,7 @@ export const RouteLabelsDisplay: React.FC<RouteLabelsDisplayProps> = ({ labels, 
         getIsValueEditable={(option) => !option.prescribed}
       />
 
-      <Button variant="secondary" icon="plus" disabled={getIsAddBtnDisabled(labels)} onClick={onLabelAdd}>
+      <Button variant="secondary" icon="plus" disabled={!canManageLabels || getIsAddBtnDisabled(labels)} onClick={onLabelAdd}>
         Add label
       </Button>
     </Stack>

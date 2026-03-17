@@ -226,6 +226,28 @@ def test_delete_resolution_note(
     assert response.data["detail"] == "Not found."
 
 
+@pytest.mark.django_db
+def test_delete_resolution_note_accepts_django_delete_kwargs(
+    make_organization_and_user_with_plugin_token,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_resolution_note,
+):
+    organization, user, _ = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    resolution_note = make_resolution_note(
+        alert_group=alert_group,
+        source=ResolutionNote.Source.WEB,
+        author=user,
+    )
+
+    resolution_note.delete(using="default")
+    resolution_note.refresh_from_db()
+
+    assert resolution_note.deleted_at is not None
+
+
 @patch(
     "apps.api.views.resolution_note.ResolutionNoteView.create",
     return_value=Response(

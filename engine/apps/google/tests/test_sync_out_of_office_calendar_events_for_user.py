@@ -7,7 +7,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
 from apps.google import constants, tasks
-from apps.google.models import GoogleOAuth2User
+from apps.google.models import GoogleOAuth2Organization, GoogleOAuth2User
 from apps.schedules.models import CustomOnCallShift, OnCallScheduleWeb, ShiftSwapRequest
 
 
@@ -469,3 +469,104 @@ def test_sync_out_of_office_calendar_events_for_all_users_filters_out_users_from
 
     tasks.sync_out_of_office_calendar_events_for_all_users()
     mock_sync_out_of_office_calendar_events_for_user.assert_called_once_with(args=(google_oauth2_user.pk,))
+
+
+@patch("apps.google.client.build")
+@pytest.mark.parametrize(
+    "ErrorClass,http_status,should_reset_org_google_oauth2_settings,task_should_raise_exception",
+    [
+        (RefreshError, None, True, False),
+        (HttpError, 401, False, False),
+        (HttpError, 500, False, False),
+        (HttpError, 403, False, False),
+        (Exception, None, False, True),
+    ],
+)
+@pytest.mark.django_db
+def test_check_google_calendar_connection_for_organization_error_scenarios(
+    mock_google_api_client_build,
+    ErrorClass,
+    http_status,
+    should_reset_org_google_oauth2_settings,
+    task_should_raise_exception,
+    make_organization_and_user,
+):
+    if ErrorClass == HttpError:
+        mock_response = MockResponse(reason="forbidden", status=http_status)
+        exception = ErrorClass(resp=mock_response, content=b"error")
+    elif ErrorClass == RefreshError:
+        exception = ErrorClass(
+            "invalid_grant: Token has been expired or revoked.",
+            {"error": "invalid_grant", "error_description": "Token has been expired or revoked."},
+        )
+    else:
+        exception = ErrorClass()
+
+    mock_google_api_client_build.return_value.events.return_value.list.return_value.execute.side_effect = exception
+
+    organization, user = make_organization_and_user()
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin@example.com",
+        },
+        connected_by=user,
+    )
+
+    google_oauth2_organization_pk = organization.google_oauth2_organization.pk
+
+    if task_should_raise_exception:
+        with pytest.raises(ErrorClass):
+            tasks.check_google_calendar_connection_for_organization(google_oauth2_organization_pk)
+    else:
+        tasks.check_google_calendar_connection_for_organization(google_oauth2_organization_pk)
+
+        organization.refresh_from_db()
+        google_oauth2_organization_count = GoogleOAuth2Organization.objects.filter(organization=organization).count()
+
+        if should_reset_org_google_oauth2_settings:
+            assert organization.has_google_oauth2_organization_connected is False
+            assert google_oauth2_organization_count == 0
+        else:
+            assert organization.has_google_oauth2_organization_connected is True
+            assert google_oauth2_organization_count == 1
+
+
+@patch("apps.google.tasks.check_google_calendar_connection_for_organization.apply_async")
+@pytest.mark.django_db
+def test_check_google_calendar_connections_for_all_organizations_filters_out_deleted_organizations(
+    mock_check_google_calendar_connection_for_organization,
+    make_organization_and_user,
+):
+    organization, user = make_organization_and_user()
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin@example.com",
+        },
+        connected_by=user,
+    )
+    google_oauth2_organization = organization.google_oauth2_organization
+
+    deleted_organization, deleted_user = make_organization_and_user()
+    deleted_organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id-2",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin2@example.com",
+        },
+        connected_by=deleted_user,
+    )
+    deleted_organization.delete()
+
+    tasks.check_google_calendar_connections_for_all_organizations()
+
+    mock_check_google_calendar_connection_for_organization.assert_called_once_with(args=(google_oauth2_organization.pk,))

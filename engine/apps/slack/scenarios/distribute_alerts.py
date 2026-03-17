@@ -1,12 +1,16 @@
 import json
+import re
 import logging
 import typing
 from datetime import datetime
+from json import JSONDecodeError
+
+from django.conf import settings
 
 from apps.alerts.constants import ActionSource
 from apps.alerts.incident_appearance.renderers.constants import DEFAULT_BACKUP_TITLE
 from apps.alerts.incident_appearance.renderers.slack_renderer import AlertSlackRenderer
-from apps.alerts.models import Alert, AlertGroup, AlertGroupLogRecord, AlertReceiveChannel, Invitation
+from apps.alerts.models import Alert, AlertGroup, AlertGroupLogRecord, AlertReceiveChannel, EscalationPolicy, Invitation
 from apps.api.permissions import RBACPermission
 from apps.slack.chatops_proxy_routing import make_private_metadata, make_value
 from apps.slack.errors import (
@@ -19,7 +23,7 @@ from apps.slack.errors import (
     SlackAPIRestrictedActionError,
     SlackAPITokenError,
 )
-from apps.slack.models import SlackTeamIdentity, SlackUserIdentity
+from apps.slack.models import SlackChannel, SlackTeamIdentity, SlackUserIdentity
 from apps.slack.scenarios import scenario_step
 from apps.slack.slack_formatter import SlackFormatter
 from apps.slack.tasks import send_message_to_thread_if_bot_not_in_channel
@@ -32,6 +36,12 @@ from apps.slack.types import (
     ModalView,
     PayloadType,
     ScenarioRoute,
+)
+from common.jinja_templater.apply_jinja_template import (
+    JinjaTemplateError,
+    JinjaTemplateWarning,
+    apply_jinja_template,
+    templated_value_is_truthy,
 )
 from common.utils import clean_markup, is_string_with_visible_characters
 
@@ -47,6 +57,146 @@ logger.setLevel(logging.DEBUG)
 
 
 class IncomingAlertStep(scenario_step.ScenarioStep):
+
+    def slack_safe_title(self, title: str, max_length: int = 80) -> str:
+        if not title or type(title) != str:
+            return title
+        value = title.lower()
+        value = re.sub(r'[^a-z0-9]+', '-', value)
+        value = value.strip('-')
+        if max_length:
+            value = value[:max_length].rstrip('-')
+        return value
+
+    def _get_custom_slack_channel(self, alert: Alert) -> typing.Optional[SlackChannel]:
+        if not (settings.FEATURE_SLACK_INTEGRATION_ENABLED and settings.FEATURE_SLACK_CHANNEL_CREATION_ENABLED):
+            return None
+
+        alert_group = alert.group
+        if alert_group is None:
+            return None
+
+        alert_receive_channel = alert_group.channel
+        custom_channel_enabled_template = alert_receive_channel.get_template_attribute("slack", "create_custom_channel")
+        if custom_channel_enabled_template is None:
+            custom_channel_enabled_template = alert_receive_channel.get_default_template_attribute(
+                "slack", "create_custom_channel"
+            )
+
+        if not custom_channel_enabled_template:
+            return None
+
+        try:
+            create_custom_channel = templated_value_is_truthy(
+                apply_jinja_template(
+                    custom_channel_enabled_template,
+                    payload=alert.raw_request_data
+                )
+            )
+        except (JinjaTemplateError, JinjaTemplateWarning) as e:
+            logger.warning(
+                "Skipping custom Slack channel creation for alert_group %s due to invalid enable template: %s",
+                alert_group.pk,
+                e.fallback_message,
+            )
+            return None
+
+        if not create_custom_channel:
+            return None
+
+        payload_template = alert_receive_channel.get_template_attribute("slack", "channel_payload")
+        if payload_template is None:
+            payload_template = alert_receive_channel.get_default_template_attribute("slack", "channel_payload")
+
+        if not payload_template:
+            logger.warning(
+                "Skipping custom Slack channel creation for alert_group %s because channel payload template is empty",
+                alert_group.pk,
+            )
+            return None
+
+        try:
+            rendered_payload = apply_jinja_template(
+                payload_template,
+                payload=alert.raw_request_data
+            )
+            channel_payload = json.loads(rendered_payload)
+        except (JinjaTemplateError, JinjaTemplateWarning) as e:
+            logger.warning(
+                "Skipping custom Slack channel creation for alert_group %s due to payload template error: %s",
+                alert_group.pk,
+                e.fallback_message,
+            )
+            return None
+        except JSONDecodeError as e:
+            logger.warning(
+                "Skipping custom Slack channel creation for alert_group %s due to invalid JSON payload: %s",
+                alert_group.pk,
+                str(e),
+            )
+            return None
+
+        if not isinstance(channel_payload, dict):
+            logger.warning(
+                "Skipping custom Slack channel creation for alert_group %s because rendered payload is not an object",
+                alert_group.pk,
+            )
+            return None
+
+        channel_name = self.slack_safe_title(channel_payload.get("name"))
+        if not channel_name or not isinstance(channel_name, str):
+            logger.warning(
+                "Skipping custom Slack channel creation for alert_group %s because channel name is missing",
+                alert_group.pk,
+            )
+            return None
+
+        slack_team_identity = self.slack_team_identity
+        existing_channel = SlackChannel.objects.filter(
+            slack_team_identity=slack_team_identity,
+            name=channel_name,
+        ).first()
+        if existing_channel is not None:
+            alert_group.log_records.create(
+                type=AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED,
+                action_source=ActionSource.SLACK,
+                step_specific_info={
+                    "slack_channel_name": existing_channel.name,
+                    "slack_channel_id": existing_channel.slack_id,
+                    "slack_team_id": slack_team_identity.slack_id,
+                    "slack_channel_reused": True,
+                },
+            )
+            return existing_channel
+
+        response = self._slack_client.conversations_create(
+            name=channel_name,
+            is_private=bool(channel_payload.get("is_private", False)),
+        )
+        slack_channel_data = response["channel"]
+        self._slack_client.conversations_join(channel=slack_channel_data["id"])
+        slack_channel, _ = SlackChannel.objects.get_or_create(
+            slack_id=slack_channel_data["id"],
+            slack_team_identity=slack_team_identity,
+            defaults={
+                "alert_group": alert_group,
+                "name": slack_channel_data["name"],
+                "is_archived": slack_channel_data.get("is_archived", False),
+                "is_shared": slack_channel_data.get("is_shared"),
+            },
+        )
+        alert_group.log_records.create(
+            type=AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED,
+            action_source=ActionSource.SLACK,
+            step_specific_info={
+                "slack_channel_name": slack_channel.name,
+                "slack_channel_id": slack_channel.slack_id,
+                "slack_team_id": slack_team_identity.slack_id,
+                "slack_channel_reused": False,
+            },
+        )
+        return slack_channel
+
     def process_signal(self, alert: Alert) -> None:
         """
         🐉 Here lay dragons 🐉
@@ -126,10 +276,13 @@ class IncomingAlertStep(scenario_step.ScenarioStep):
         if num_updated_rows == 1:
             # this will be the case in the event that we haven't yet created a Slack message for this alert group
 
+            slack_channel = self._get_custom_slack_channel(alert)
+
             # if channel filter is deleted mid escalation, use the organization's default Slack channel
-            slack_channel = (
-                channel_filter.slack_channel_or_org_default if channel_filter else organization.default_slack_channel
-            )
+            if slack_channel is None:
+                slack_channel = (
+                    channel_filter.slack_channel_or_org_default if channel_filter else organization.default_slack_channel
+                )
 
             # slack_channel can be None if the channel filter is deleted mid escalation, OR the channel filter does
             # not have a slack channel
@@ -240,7 +393,6 @@ class IncomingAlertStep(scenario_step.ScenarioStep):
                     channel=slack_channel_id,
                     text=text,
                     attachments=[],
-                    thread_ts=alert_group.slack_message.slack_id,
                     mrkdwn=True,
                     blocks=[
                         {
@@ -251,6 +403,7 @@ class IncomingAlertStep(scenario_step.ScenarioStep):
                             },
                         },
                     ],
+                    **alert_group.get_slack_follow_up_message_kwargs(),
                 )
 
             if not alert_group.is_maintenance_incident and not should_skip_escalation_in_slack:
@@ -632,6 +785,34 @@ class UnAttachGroupStep(AlertGroupActionsMixin, scenario_step.ScenarioStep):
         log_record.alert_group.slack_message.update_alert_groups_message(debounce=False)
 
 
+class CustomWebhookTriggeredStep(scenario_step.ScenarioStep):
+    def process_signal(self, log_record: AlertGroupLogRecord) -> None:
+        alert_group = log_record.alert_group
+        text = log_record.rendered_log_line_action(for_slack=True)
+
+        self.alert_group_slack_service.publish_message_to_alert_group_thread(alert_group, text=text)
+        alert_group.slack_message.update_alert_groups_message(debounce=False)
+
+
+class CalendarInviteFinishedStep(scenario_step.ScenarioStep):
+    def process_signal(self, log_record: AlertGroupLogRecord) -> None:
+        if log_record.escalation_policy_step != EscalationPolicy.STEP_CREATE_CALENDAR_INVITE:
+            return
+
+        step_specific_info = log_record.get_step_specific_info() or {}
+        join_link = step_specific_info.get("google_calendar_meet_link") or step_specific_info.get(
+            "google_calendar_event_link"
+        )
+
+        if not join_link:
+            return
+
+        alert_group = log_record.alert_group
+        text = f"Google Calender Invite Sent, Join Link: <{join_link}>"
+        self.alert_group_slack_service.publish_message_to_alert_group_thread(alert_group, text=text)
+        alert_group.slack_message.update_alert_groups_message(debounce=False)
+
+
 class StopInvitationProcess(AlertGroupActionsMixin, scenario_step.ScenarioStep):
     """
     THIS SCENARIO STEP IS DEPRECATED AND WILL BE REMOVED IN THE FUTURE.
@@ -907,7 +1088,7 @@ class AcknowledgeConfirmationStep(AcknowledgeGroupStep):
                             ],
                         }
                     ],
-                    thread_ts=slack_message.slack_id,
+                    **alert_group.get_slack_follow_up_message_kwargs(),
                 )
             except (SlackAPITokenError, SlackAPIChannelArchivedError, SlackAPIChannelNotFoundError):
                 pass

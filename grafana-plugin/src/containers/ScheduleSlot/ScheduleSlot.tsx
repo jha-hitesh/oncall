@@ -13,6 +13,8 @@ import NonExistentUserName from 'components/NonExistentUserName/NonExistentUserN
 import { RenderConditionally } from 'components/RenderConditionally/RenderConditionally';
 import { ScheduleFiltersType } from 'components/ScheduleFilters/ScheduleFilters.types';
 import { Text } from 'components/Text/Text';
+import { WithPermissionControlTooltip } from 'containers/WithPermissionControl/WithPermissionControlTooltip';
+import { getScheduleManagementWriteUserAction, isUserActionAllowed } from 'helpers/authorization/authorization';
 import { WorkingHours } from 'components/WorkingHours/WorkingHours';
 import { getShiftName, scheduleViewToDaysInOneRow, SHIFT_SWAP_COLOR } from 'models/schedule/schedule.helpers';
 import { Event, ScheduleView, ShiftSwap } from 'models/schedule/schedule.types';
@@ -329,11 +331,8 @@ const RegularEvent = (props: RegularEventProps) => {
                 benefactorName={isShiftSwap ? (swap_request.user ? display_name : undefined) : undefined}
                 user={storeUser}
                 event={event}
-                handleAddOverride={
-                  !handleAddOverride || event.is_override || isShiftSwap || currentMoment.isAfter(dayjs(event.end))
-                    ? undefined
-                    : handleAddOverride
-                }
+                handleAddOverride={!handleAddOverride || currentMoment.isAfter(dayjs(event.end)) ? undefined : handleAddOverride}
+                showAddOverrideButton={!event.is_override && !isShiftSwap && !currentMoment.isAfter(dayjs(event.end))}
                 handleAddShiftSwap={
                   !handleAddShiftSwap || isShiftSwap || !isCurrentUserSlot || currentMoment.isAfter(dayjs(event.start))
                     ? undefined
@@ -358,6 +357,7 @@ interface ScheduleSlotDetailsProps {
   isOncall?: boolean;
   event: Event;
   handleAddOverride?: (event: React.SyntheticEvent) => void;
+  showAddOverrideButton?: boolean;
   handleAddShiftSwap?: (event: React.SyntheticEvent) => void;
   handleOpenSchedule?: (event: React.SyntheticEvent) => void;
   color: string;
@@ -373,6 +373,7 @@ const ScheduleSlotDetails = observer((props: ScheduleSlotDetailsProps) => {
     user,
     event,
     handleAddOverride,
+    showAddOverrideButton,
     handleAddShiftSwap,
     handleOpenSchedule,
     color,
@@ -385,6 +386,7 @@ const ScheduleSlotDetails = observer((props: ScheduleSlotDetailsProps) => {
 
   const {
     scheduleStore,
+    organizationStore,
     timezoneStore: { currentDateInSelectedTimezone, getDateInSelectedTimezone },
   } = useStore();
 
@@ -392,6 +394,10 @@ const ScheduleSlotDetails = observer((props: ScheduleSlotDetailsProps) => {
   const shift = scheduleStore.shifts[shiftId];
 
   const schedule = scheduleStore.items[shift?.schedule];
+  const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+    organizationStore.currentOrganization?.schedule_management_require_admin
+  );
+  const canManageSchedule = isUserActionAllowed(scheduleManagementWriteAction);
 
   const enableWebOverrides = schedule?.enable_web_overrides;
 
@@ -490,10 +496,18 @@ const ScheduleSlotDetails = observer((props: ScheduleSlotDetailsProps) => {
               Request shift swap
             </Button>
           )}
-          {handleAddOverride && enableWebOverrides && (
-            <Button size="sm" variant="secondary" onClick={handleAddOverride}>
-              + Override
-            </Button>
+          {showAddOverrideButton && enableWebOverrides && (
+            canManageSchedule && handleAddOverride ? (
+              <Button size="sm" variant="secondary" onClick={handleAddOverride}>
+                + Override
+              </Button>
+            ) : (
+              <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
+                <Button size="sm" variant="secondary" disabled={!canManageSchedule}>
+                  + Override
+                </Button>
+              </WithPermissionControlTooltip>
+            )
           )}
           {handleOpenSchedule && (
             <Button size="sm" variant="secondary" onClick={handleOpenSchedule}>

@@ -51,9 +51,9 @@ class AlertGroupSlackService:
                 channel=slack_message.channel.slack_id,
                 text=text,
                 attachments=attachments,
-                thread_ts=slack_message.slack_id,
                 mrkdwn=mrkdwn,
                 unfurl_links=unfurl_links,
+                **alert_group.get_slack_follow_up_message_kwargs(),
             )
         except (
             SlackAPITokenError,

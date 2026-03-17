@@ -309,9 +309,6 @@ class GrafanaAPIClient(APIClient):
     def get_grafana_incident_plugin_settings(self) -> APIClientResponse["GrafanaAPIClient.Types.PluginSettings"]:
         return self.get_grafana_plugin_settings(PluginID.INCIDENT)
 
-    def get_grafana_labels_plugin_settings(self) -> APIClientResponse["GrafanaAPIClient.Types.PluginSettings"]:
-        return self.get_grafana_plugin_settings(PluginID.LABELS)
-
     def get_grafana_irm_plugin_settings(self) -> APIClientResponse["GrafanaAPIClient.Types.PluginSettings"]:
         return self.get_grafana_plugin_settings(PluginID.IRM)
 

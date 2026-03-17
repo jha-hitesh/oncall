@@ -18,10 +18,12 @@ export enum Resource {
   MAINTENANCE = 'maintenance',
   API_KEYS = 'api-keys',
   NOTIFICATIONS = 'notifications',
+  LABEL = 'label',
 
   NOTIFICATION_SETTINGS = 'notification-settings',
   USER_SETTINGS = 'user-settings',
   OTHER_SETTINGS = 'other-settings',
+  ADMIN = 'admin',
 
   TEAMS = 'teams',
 }
@@ -34,9 +36,11 @@ export enum Action {
   EXPORT = 'export',
   UPDATE_SETTINGS = 'update-settings',
   DIRECT_PAGING = 'direct-paging',
+  CREATE = 'create',
 }
 
 type Actions =
+  | 'OnCallAdmin'
   | 'AlertGroupsRead'
   | 'AlertGroupsWrite'
   | 'AlertGroupsDirectPaging'
@@ -58,6 +62,9 @@ type Actions =
   | 'APIKeysRead'
   | 'APIKeysWrite'
   | 'NotificationsRead'
+  | 'LabelsRead'
+  | 'LabelsWrite'
+  | 'LabelsCreate'
   | 'NotificationSettingsRead'
   | 'NotificationSettingsWrite'
   | 'UserSettingsRead'
@@ -122,6 +129,7 @@ const constructAction = (
 });
 
 export const UserActions: { [action in Actions]: UserAction } = {
+  OnCallAdmin: constructAction(Resource.ADMIN, Action.ADMIN, OrgRole.Admin),
   AlertGroupsRead: constructAction(Resource.ALERT_GROUPS, Action.READ, OrgRole.Viewer),
   AlertGroupsWrite: constructAction(Resource.ALERT_GROUPS, Action.WRITE, OrgRole.Editor),
   AlertGroupsDirectPaging: constructAction(Resource.ALERT_GROUPS, Action.DIRECT_PAGING, OrgRole.Editor),
@@ -152,6 +160,10 @@ export const UserActions: { [action in Actions]: UserAction } = {
 
   NotificationsRead: constructAction(Resource.NOTIFICATIONS, Action.READ, OrgRole.Editor),
 
+  LabelsRead: constructAction(Resource.LABEL, Action.READ, OrgRole.Viewer),
+  LabelsWrite: constructAction(Resource.LABEL, Action.WRITE, OrgRole.Admin),
+  LabelsCreate: constructAction(Resource.LABEL, Action.CREATE, OrgRole.Admin),
+
   NotificationSettingsRead: constructAction(Resource.NOTIFICATION_SETTINGS, Action.READ, OrgRole.Viewer),
   NotificationSettingsWrite: constructAction(Resource.NOTIFICATION_SETTINGS, Action.WRITE, OrgRole.Editor),
 
@@ -165,3 +177,8 @@ export const UserActions: { [action in Actions]: UserAction } = {
   // These are not oncall specific
   TeamsWrite: constructAction(Resource.TEAMS, Action.WRITE, OrgRole.Admin, false),
 };
+
+export const getScheduleManagementWriteUserAction = (scheduleManagementRequireAdmin = false): UserAction =>
+  scheduleManagementRequireAdmin
+    ? constructAction(Resource.SCHEDULES, Action.WRITE, OrgRole.Admin)
+    : UserActions.SchedulesWrite;

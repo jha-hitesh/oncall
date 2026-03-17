@@ -12,6 +12,8 @@ export const WebhookFormFieldName = {
   Password: 'password',
   AuthorizationHeader: 'authorization_header',
   TriggerTemplate: 'trigger_template',
+  AddResponseToTimeline: 'add_response_to_timeline',
+  ResponseTemplate: 'response_template',
   ForwardAll: 'forward_all',
   Data: 'data',
 } as const;

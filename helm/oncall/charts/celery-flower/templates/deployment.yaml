@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "celery-flower.fullname" . }}
+  labels:
+    app: {{ template "celery-flower.name" . }}
+    chart: {{ template "celery-flower.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "celery-flower.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "celery-flower.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          env:
+            - name: CELERY_BROKER_URL
+              value: {{ .Values.celery.brokerUrl | quote }}
+            {{- if .Values.celery.result_backend }}
+            - name: CELERY_RESULT_BACKEND
+              value: {{ .Values.celery.resultBackend | quote }}
+            {{ end }}
+          envFrom:
+            - configMapRef:
+                name: {{ template "celery-flower.fullname" . }}
+            - secretRef: 
+                name: {{ template "celery-flower.fullname" . }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.applicationPort }}
+              protocol: TCP
+          livenessProbe: 
+            httpGet:
+              path: /
+              port: http
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+    {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+    {{- end }}

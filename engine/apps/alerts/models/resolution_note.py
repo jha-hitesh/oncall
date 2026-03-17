@@ -1,4 +1,5 @@
 import typing
+from datetime import datetime, timezone as dt_timezone
 
 import humanize
 from django.conf import settings
@@ -32,11 +33,11 @@ def generate_public_primary_key_for_resolution_note():
 
 
 class ResolutionNoteSlackMessageQueryset(models.QuerySet):
-    def delete(self):
+    def delete(self, *args, **kwargs):
         resolution_note = self.get_resolution_note()
         if resolution_note:
-            resolution_note.delete()
-        super().delete()
+            resolution_note.delete(*args, **kwargs)
+        return super().delete(*args, **kwargs)
 
 
 class ResolutionNoteSlackMessage(models.Model):
@@ -99,13 +100,22 @@ class ResolutionNoteSlackMessage(models.Model):
             resolution_note.delete()
         return super().delete(*args, **kwargs)
 
+    def get_original_created_at(self) -> typing.Optional[datetime]:
+        if self.ts is None:
+            return None
+
+        try:
+            return datetime.fromtimestamp(float(self.ts), tz=dt_timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
 
 class ResolutionNoteQueryset(models.QuerySet):
-    def delete(self):
-        self.update(deleted_at=timezone.now())
+    def delete(self, *args, **kwargs):
+        return self.update(deleted_at=timezone.now())
 
-    def hard_delete(self):
-        super().delete()
+    def hard_delete(self, *args, **kwargs):
+        return super().delete(*args, **kwargs)
 
     def filter(self, *args, **kwargs):
         return super().filter(*args, **kwargs, deleted_at__isnull=True)
@@ -156,11 +166,11 @@ class ResolutionNote(models.Model):
     )
     deleted_at = models.DateTimeField(default=None, null=True)
 
-    def delete(self):
-        ResolutionNote.objects.filter(pk=self.pk).delete()
+    def delete(self, *args, **kwargs):
+        return ResolutionNote.objects.filter(pk=self.pk).delete(*args, **kwargs)
 
-    def hard_delete(self):
-        super().delete()
+    def hard_delete(self, *args, **kwargs):
+        return super().delete(*args, **kwargs)
 
     @property
     def text(self):
@@ -175,6 +185,25 @@ class ResolutionNote(models.Model):
         """
         self.deleted_at = None
         self.save(update_fields=["deleted_at"])
+
+    @classmethod
+    def create_from_slack_message(
+        cls, alert_group: "AlertGroup", resolution_note_slack_message: ResolutionNoteSlackMessage
+    ) -> "ResolutionNote":
+        resolution_note = cls.objects.create(
+            alert_group=alert_group,
+            author=resolution_note_slack_message.user,
+            source=cls.Source.SLACK,
+            resolution_note_slack_message=resolution_note_slack_message,
+        )
+
+        if settings.FEATURE_SLACK_USE_ORIGINAL_TS_IN_RESOLUTION_NOTE:
+            original_created_at = resolution_note_slack_message.get_original_created_at()
+            if original_created_at is not None:
+                resolution_note.created_at = original_created_at
+                resolution_note.save(update_fields=["created_at"])
+
+        return resolution_note
 
     def render_log_line_json(self):
         time = humanize.naturaldelta(self.alert_group.started_at - self.created_at)

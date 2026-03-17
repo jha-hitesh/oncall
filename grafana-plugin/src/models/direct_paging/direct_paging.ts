@@ -4,6 +4,7 @@ import { UserResponders } from 'containers/AddResponders/AddResponders.types';
 import { BaseStore } from 'models/base_store';
 import { GrafanaTeam } from 'models/grafana_team/grafana_team.types';
 import { makeRequest } from 'network/network';
+import { getDirectPagingTeamLabels } from 'models/direct_paging/direct_paging.helpers';
 import { ApiSchemas } from 'network/oncall-api/api.types';
 import { RootStore } from 'state/rootStore';
 
@@ -53,6 +54,24 @@ export class DirectPagingStore extends BaseStore {
   resetSelectedTeam = () => {
     this.selectedTeamResponder = null;
   };
+
+  async fetchTeamDirectPagingLabels(teamId: GrafanaTeam['id']) {
+    try {
+      const integrations = await makeRequest<ApiSchemas['AlertReceiveChannel'][]>('/alert_receive_channels/', {
+        method: 'GET',
+        params: {
+          integration: ['direct_paging'],
+          team: [teamId],
+          skip_pagination: 'true',
+        },
+      });
+
+      return getDirectPagingTeamLabels(integrations[0]);
+    } catch (err) {
+      this.onApiError(err);
+      return undefined;
+    }
+  }
 
   @action.bound
   removeSelectedUser(index: number) {

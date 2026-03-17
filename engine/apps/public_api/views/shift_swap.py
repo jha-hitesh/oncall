@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 
-from apps.api.permissions import AuthenticatedRequest, RBACPermission
+from apps.api.permissions import AuthenticatedRequest, RBACPermission, get_schedule_management_write_permissions
 from apps.api.views.shift_swap import BaseShiftSwapViewSet
 from apps.auth_token.auth import ApiTokenAuthentication, GrafanaServiceAccountAuthentication
 from apps.public_api.throttlers.user_throttle import UserThrottle
@@ -29,11 +29,11 @@ class ShiftSwapViewSet(RateLimitHeadersMixin, BaseShiftSwapViewSet):
     rbac_permissions = {
         "list": [RBACPermission.Permissions.SCHEDULES_READ],
         "retrieve": [RBACPermission.Permissions.SCHEDULES_READ],
-        "create": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "partial_update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "destroy": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "take": [RBACPermission.Permissions.SCHEDULES_WRITE],
+        "create": get_schedule_management_write_permissions,
+        "update": get_schedule_management_write_permissions,
+        "partial_update": get_schedule_management_write_permissions,
+        "destroy": get_schedule_management_write_permissions,
+        "take": get_schedule_management_write_permissions,
     }
 
     # public API customizations

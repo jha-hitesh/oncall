@@ -1,13 +1,144 @@
 import logging
+import json
 
 from django.urls import reverse
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
 from apps.alerts.constants import ActionSource
+from apps.alerts.incident_appearance.renderers.phone_call_renderer import AlertGroupPhoneCallRenderer
+from apps.base.utils import live_settings
 from apps.twilioapp.models import TwilioPhoneCall
 from common.api_helpers.utils import create_engine_url
+from settings.base import PHONE_CALL_INSTRUCTIONS_CONFIG, PHONE_CALL_INSTRUCTIONS_TEMPLATE
 
 logger = logging.getLogger(__name__)
+DEFAULT_SILENCE_DELAY_SECONDS = 1800
+DEFAULT_WAIT_TIME_FOR_USER_ACTION = 5
+DEFAULT_ACTION_SUCCESS_MESSAGES = {
+    "acknowledge": "The alert is Acknowledged",
+    "resolve": "The alert is marked Resolved",
+    "silence": "The alert is Silenced",
+}
+ACTION_SUCCESS_MESSAGE_CONFIG_KEYS = {
+    "acknowledge": "acknowledge_message",
+    "resolve": "resolve_message",
+    "silence": "silence_message",
+}
+DEFAULT_PHONE_CALL_INSTRUCTIONS_CONFIG = {
+    "acknowledge_button": "1",
+    "resolve_button": "2",
+    "silence_button": "3",
+    "wait_time_for_user_action": DEFAULT_WAIT_TIME_FOR_USER_ACTION,
+}
+
+
+def _get_phone_call_instructions_config() -> dict:
+    config = live_settings.PHONE_CALL_INSTRUCTIONS_CONFIG
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            config = None
+
+    if not isinstance(config, dict):
+        return PHONE_CALL_INSTRUCTIONS_CONFIG.copy()
+
+    normalized_config = PHONE_CALL_INSTRUCTIONS_CONFIG.copy()
+    normalized_config.update(config)
+    return normalized_config
+
+
+def _get_valid_integer_value(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _get_valid_phone_call_button(value) -> str | None:
+    if isinstance(value, int):
+        value = str(value)
+    if isinstance(value, str) and (value.isdigit() or value in {"*", "#"}):
+        return value
+    return None
+
+
+def _get_button_digit(config: dict, key: str, *, required: bool = False) -> str | None:
+    value = _get_valid_phone_call_button(config.get(key))
+    if value is None:
+        if required:
+            return _get_valid_phone_call_button(DEFAULT_PHONE_CALL_INSTRUCTIONS_CONFIG.get(key))
+        return None
+    return value
+
+
+def _get_enabled_actions() -> dict[str, str]:
+    config = _get_phone_call_instructions_config()
+    actions = {}
+    acknowledge_button = _get_button_digit(config, "acknowledge_button", required=True)
+    if acknowledge_button is not None:
+        actions["acknowledge"] = acknowledge_button
+
+    for action, key in (
+        ("resolve", "resolve_button"),
+        ("silence", "silence_button"),
+        ("repeat", "repeat_button"),
+    ):
+        button = _get_button_digit(config, key)
+        if button is not None:
+            actions[action] = button
+
+    return actions
+
+
+def get_phone_call_wait_time_for_user_action() -> int:
+    config = _get_phone_call_instructions_config()
+    wait_time = _get_valid_integer_value(config.get("wait_time_for_user_action"))
+    return wait_time if wait_time is not None else DEFAULT_WAIT_TIME_FOR_USER_ACTION
+
+
+def get_phone_call_silence_in_minutes() -> int:
+    config = _get_phone_call_instructions_config()
+    silence_in_minutes = _get_valid_integer_value(config.get("silence_in_minutes"))
+    if silence_in_minutes is None:
+        return DEFAULT_SILENCE_DELAY_SECONDS // 60
+    return silence_in_minutes
+
+
+def _get_default_phone_call_instructions_template(enabled_actions: dict[str, str]) -> str:
+    action_phrases = []
+    if enabled_actions.get("acknowledge") is not None:
+        action_phrases.append("Press {acknowledge_button} to acknowledge")
+    if enabled_actions.get("resolve") is not None:
+        action_phrases.append("{resolve_button} to resolve")
+    if enabled_actions.get("silence") is not None:
+        action_phrases.append("{silence_button} to silence for {silence_in_minutes} minutes")
+    if enabled_actions.get("repeat") is not None:
+        action_phrases.append("{repeat_button} to repeat this message")
+
+    if not action_phrases:
+        return "No phone call actions are configured"
+    if len(action_phrases) == 1:
+        return action_phrases[0]
+    if len(action_phrases) == 2:
+        return " and ".join(action_phrases)
+    return ", ".join(action_phrases[:-1]) + f" and {action_phrases[-1]}"
+
+
+def _get_action_by_digit() -> dict[str, str]:
+    return {digit: action for action, digit in _get_enabled_actions().items()}
+
+
+def _get_action_success_message(action: str) -> str | None:
+    config = _get_phone_call_instructions_config()
+    config_key = ACTION_SUCCESS_MESSAGE_CONFIG_KEYS.get(action)
+    configured_message = config.get(config_key) if config_key else None
+    if isinstance(configured_message, str) and configured_message:
+        return configured_message
+    return DEFAULT_ACTION_SUCCESS_MESSAGES.get(action)
 
 
 def process_gather_data(call_sid: str, digit: str) -> VoiceResponse:
@@ -23,20 +154,31 @@ def process_gather_data(call_sid: str, digit: str) -> VoiceResponse:
     """
 
     response = VoiceResponse()
+    action_by_digit = _get_action_by_digit()
+    action = action_by_digit.get(digit)
 
-    success_messages = {
-        "1": "Acknowledged",
-        "2": "Resolved",
-        "3": "Silenced",
-    }
-    if digit in ["1", "2", "3"]:
+    success_message = _get_action_success_message(action)
+    if success_message is not None:
         # Success case
-        msg = success_messages.get(digit, f"You have pressed digit {digit}")
-        response.say(msg)
-        process_digit(call_sid, digit)
+        response.say(success_message)
+        process_digit(call_sid, action)
     else:
+        if action == "repeat":
+            # Repeat current alert group message
+            message = get_repeat_message(call_sid)
+            gather = Gather(
+                action=get_gather_url(), method="POST",
+                num_digits=1, timeout=get_phone_call_wait_time_for_user_action()
+            )
+            if message:
+                gather.say(message)
+                gather.pause(length=1)
+            gather.say(get_alert_group_gather_instructions())
+            response.append(gather)
         # Error wrong digit pressing
-        gather = Gather(action=get_gather_url(), method="POST", num_digits=1)
+        gather = Gather(
+            action=get_gather_url(), method="POST",
+            num_digits=1, timeout=get_phone_call_wait_time_for_user_action())
 
         response.say("Wrong digit")
         gather.say(get_alert_group_gather_instructions())
@@ -46,26 +188,50 @@ def process_gather_data(call_sid: str, digit: str) -> VoiceResponse:
     return response
 
 
-def process_digit(call_sid, digit):
+def get_repeat_message(call_sid: str) -> str | None:
+    if not call_sid:
+        return None
+
+    twilio_phone_call = (
+        TwilioPhoneCall.objects.select_related("phone_call_record__represents_alert_group").filter(sid=call_sid).first()
+    )
+    if twilio_phone_call is None:
+        logger.info(f"twilioapp.get_repeat_message: twilio_phone_call not found sid={call_sid}")
+        return None
+
+    phone_call_record = twilio_phone_call.phone_call_record
+    if phone_call_record is None:
+        logger.info(f"twilioapp.get_repeat_message: twilio_phone_call has no phone_call_record sid={call_sid}")
+        return None
+
+    alert_group = phone_call_record.represents_alert_group
+    if alert_group is None:
+        logger.info(f"twilioapp.get_repeat_message: phone_call_record has no alert_group sid={call_sid}")
+        return None
+
+    return AlertGroupPhoneCallRenderer(alert_group).render()
+
+
+def process_digit(call_sid, action):
     """
     The function get Phone Call instance according to call_sid
             and run process of pressed digit
 
             Args:
                 call_sid (str):
-                digit (str):
+                action (str):
 
             Returns:
 
     """
-    if call_sid and digit:
-        logger.info(f"twilioapp.process_digit: processing sid={call_sid} digit={digit}")
+    if call_sid and action:
+        logger.info(f"twilioapp.process_digit: processing sid={call_sid} action={action}")
         twilio_phone_call = TwilioPhoneCall.objects.filter(sid=call_sid).first()
         if twilio_phone_call is None:
             logger.info(f"twilioapp.process_digit: twilio_phone_call not found sid={call_sid}")
             return
 
-        logger.info(f"twilioapp.process_digit: found twilio_phone_call sid={call_sid} digit={digit}")
+        logger.info(f"twilioapp.process_digit: found twilio_phone_call sid={call_sid} action={action}")
         phone_call_record = twilio_phone_call.phone_call_record
 
         if phone_call_record is None:
@@ -76,15 +242,17 @@ def process_digit(call_sid, digit):
         alert_group = phone_call_record.represents_alert_group
         user = phone_call_record.receiver
         logger.info(
-            f"twilioapp.process_digit: processing digit phone_call_record id={phone_call_record.id} "
-            f"twilio_phone_call_sid={call_sid} digit={digit} alert_group_id={alert_group.id} user_id={user.id}"
+            f"twilioapp.process_digit: processing action phone_call_record id={phone_call_record.id} "
+            f"twilio_phone_call_sid={call_sid} action={action} alert_group_id={alert_group.id} user_id={user.id}"
         )
-        if digit == "1":
+        if action == "acknowledge":
             alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
-        elif digit == "2":
+        elif action == "resolve":
             alert_group.resolve_by_user_or_backsync(user, action_source=ActionSource.PHONE)
-        elif digit == "3":
-            alert_group.silence_by_user_or_backsync(user, silence_delay=1800, action_source=ActionSource.PHONE)
+        elif action == "silence":
+            alert_group.silence_by_user_or_backsync(
+                user, silence_delay=get_phone_call_silence_in_minutes() * 60, action_source=ActionSource.PHONE
+            )
 
 
 def get_gather_url():
@@ -92,4 +260,14 @@ def get_gather_url():
 
 
 def get_alert_group_gather_instructions():
-    return "Press 1 to acknowledge, 2 to resolve, 3 to silence for 30 minutes"
+    enabled_actions = _get_enabled_actions()
+    template = live_settings.PHONE_CALL_INSTRUCTIONS_TEMPLATE
+    if not template:
+        template = _get_default_phone_call_instructions_template(enabled_actions)
+    return template.format(
+        acknowledge_button=enabled_actions.get("acknowledge", ""),
+        resolve_button=enabled_actions.get("resolve", ""),
+        silence_button=enabled_actions.get("silence", ""),
+        repeat_button=enabled_actions.get("repeat", ""),
+        silence_in_minutes=get_phone_call_silence_in_minutes(),
+    )

@@ -2,7 +2,6 @@ import React, { SyntheticEvent } from 'react';
 
 import { css, cx } from '@emotion/css';
 import { GrafanaTheme2, durationToMilliseconds, parseDuration, SelectableValue } from '@grafana/data';
-import { LabelTag } from '@grafana/labels';
 import { Button, Icon, RadioButtonGroup, RefreshPicker, Tooltip, Stack, withTheme2 } from '@grafana/ui';
 import { LocationHelper } from 'helpers/LocationHelper';
 import { UserActions } from 'helpers/authorization/authorization';
@@ -22,6 +21,7 @@ import { GTable } from 'components/GTable/GTable';
 import { IntegrationLogo } from 'components/IntegrationLogo/IntegrationLogo';
 import { ManualAlertGroup } from 'components/ManualAlertGroup/ManualAlertGroup';
 import { PluginLink } from 'components/PluginLink/PluginLink';
+import { ColoredLabelTag, toColoredLabelParts } from 'components/ColoredLabelTag/ColoredLabelTag';
 import { RenderConditionally } from 'components/RenderConditionally/RenderConditionally';
 import { Text } from 'components/Text/Text';
 import { TextEllipsisTooltip } from 'components/TextEllipsisTooltip/TextEllipsisTooltip';
@@ -753,7 +753,7 @@ class _IncidentsPage extends React.Component<IncidentsPageProps, IncidentsPageSt
           <Stack direction="column" gap={StackSize.sm}>
             {item.labels.map((label) => (
               <Stack gap={StackSize.sm} key={label.key.id}>
-                <LabelTag label={label.key.name} value={label.value.name} key={label.key.id} />
+                <ColoredLabelTag {...toColoredLabelParts(label)} key={label.key.id} />
                 <Button
                   size="sm"
                   icon="filter"

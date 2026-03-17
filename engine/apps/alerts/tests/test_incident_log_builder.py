@@ -2,7 +2,7 @@ import pytest
 from django.utils import timezone
 
 from apps.alerts.incident_log_builder import IncidentLogBuilder
-from apps.alerts.models import EscalationPolicy
+from apps.alerts.models import AlertGroupLogRecord, EscalationPolicy
 from apps.base.models import UserNotificationPolicy, UserNotificationPolicyLogRecord
 
 
@@ -158,3 +158,42 @@ def test_escalation_plan_custom_webhooks(
     log_builder = IncidentLogBuilder(alert_group=alert_group)
     plan = log_builder.get_escalation_plan()
     assert list(plan.values()) == [[f'trigger outgoing webhook "{custom_webhook.name}"']]
+
+
+@pytest.mark.django_db
+def test_after_resolve_report_includes_calendar_invite_finished_log(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_escalation_chain,
+    make_channel_filter,
+    make_escalation_policy,
+):
+    organization, _ = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    escalation_chain = make_escalation_chain(organization, name="Escalation name")
+    channel_filter = make_channel_filter(alert_receive_channel, escalation_chain=escalation_chain)
+    escalation_policy = make_escalation_policy(
+        escalation_chain=channel_filter.escalation_chain,
+        escalation_policy_step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+    )
+
+    calendar_log = alert_group.log_records.create(
+        type=AlertGroupLogRecord.TYPE_ESCALATION_FINISHED,
+        escalation_policy=escalation_policy,
+        step_specific_info={
+            "invitees": "current escalation chain members",
+            "google_calendar_event_title": "INC-1234 War Room",
+            "google_calendar_event_link": "https://calendar.google.com/event",
+        },
+    )
+    alert_group.log_records.create(
+        type=AlertGroupLogRecord.TYPE_ESCALATION_FINISHED,
+        reason="escalation finished",
+    )
+
+    log_records = list(IncidentLogBuilder(alert_group)._get_log_records_for_after_resolve_report())
+
+    assert calendar_log in log_records
+    assert len([log for log in log_records if log.type == AlertGroupLogRecord.TYPE_ESCALATION_FINISHED]) == 1

@@ -49,7 +49,17 @@ class EscalationPolicy(OrderedModel):
         STEP_NOTIFY_TEAM_MEMBERS_IMPORTANT,
         STEP_DECLARE_INCIDENT,
         STEP_NOTIFY_USERS_QUEUE_IMPORTANT,
-    ) = range(21)
+        STEP_CREATE_CALENDAR_INVITE,
+    ) = range(22)
+
+    INVITEES_CURRENT_ONCALL_MEMBERS = "current_oncall_members"
+    INVITEES_CURRENT_ESCALATION_CHAIN_MEMBERS = "current_escalation_chain_members"
+    INVITEES_CURRENT_TEAM_MEMBERS = "current_team_members"
+    INVITEES_CHOICES = (
+        (INVITEES_CURRENT_ONCALL_MEMBERS, "Current on-call members"),
+        (INVITEES_CURRENT_ESCALATION_CHAIN_MEMBERS, "Current escalation chain members"),
+        (INVITEES_CURRENT_TEAM_MEMBERS, "Current team members"),
+    )
 
     # Must be the same order as previous
     STEP_CHOICES = (
@@ -74,6 +84,7 @@ class EscalationPolicy(OrderedModel):
         (STEP_NOTIFY_TEAM_MEMBERS_IMPORTANT, "Notify all users in a Team (Important)"),
         (STEP_DECLARE_INCIDENT, "Declare Incident"),
         (STEP_NOTIFY_USERS_QUEUE_IMPORTANT, "Notify User (next each time) (Important)"),
+        (STEP_CREATE_CALENDAR_INVITE, "Create Calender Invite"),
     )
 
     # Ordered step choices available for internal api.
@@ -95,6 +106,7 @@ class EscalationPolicy(OrderedModel):
         STEP_NOTIFY_IF_NUM_ALERTS_IN_TIME_WINDOW,
         STEP_REPEAT_ESCALATION_N_TIMES,
         STEP_DECLARE_INCIDENT,
+        STEP_CREATE_CALENDAR_INVITE,
     ]
     # Steps can be stored in db while interacting with internal api
     # Includes important versions of default steps
@@ -117,6 +129,7 @@ class EscalationPolicy(OrderedModel):
         STEP_REPEAT_ESCALATION_N_TIMES,
         STEP_DECLARE_INCIDENT,
         STEP_NOTIFY_USERS_QUEUE_IMPORTANT,
+        STEP_CREATE_CALENDAR_INVITE,
     ]
 
     # Maps internal api's steps choices to their verbal. First string in tuple is display name for existent step.
@@ -165,6 +178,10 @@ class EscalationPolicy(OrderedModel):
             "Declare Incident with severity {{severity}} (non-default routes only)",
             "Declare Incident (non-default routes only)",
         ),
+        STEP_CREATE_CALENDAR_INVITE: (
+            "Create Calender Invite for {{invitees}}",
+            "Create Calender Invite",
+        ),
     }
 
     STEPS_WITH_NO_IMPORTANT_VERSION_SET = {
@@ -175,6 +192,7 @@ class EscalationPolicy(OrderedModel):
         STEP_NOTIFY_IF_TIME,
         STEP_REPEAT_ESCALATION_N_TIMES,
         STEP_DECLARE_INCIDENT,
+        STEP_CREATE_CALENDAR_INVITE,
     }
 
     DEFAULT_TO_IMPORTANT_STEP_MAPPING = {
@@ -229,6 +247,7 @@ class EscalationPolicy(OrderedModel):
         STEP_NOTIFY_IF_NUM_ALERTS_IN_TIME_WINDOW,
         STEP_REPEAT_ESCALATION_N_TIMES,
         STEP_DECLARE_INCIDENT,
+        STEP_CREATE_CALENDAR_INVITE,
     ]
 
     PUBLIC_STEP_CHOICES_MAP = {
@@ -249,6 +268,7 @@ class EscalationPolicy(OrderedModel):
         STEP_NOTIFY_IF_NUM_ALERTS_IN_TIME_WINDOW: "notify_if_num_alerts_in_window",
         STEP_REPEAT_ESCALATION_N_TIMES: "repeat_escalation",
         STEP_DECLARE_INCIDENT: "declare_incident",
+        STEP_CREATE_CALENDAR_INVITE: "create_calendar_invite",
     }
 
     public_primary_key = models.CharField(
@@ -312,6 +332,7 @@ class EscalationPolicy(OrderedModel):
     # Incident severity for declare incident step
     SEVERITY_SET_FROM_LABEL, SEVERITY_SET_FROM_LABEL_DISPLAY_VALUE = ("set-from-label", "from 'severity' label")
     severity = models.CharField(max_length=512, null=True, default=None)
+    invitees = models.CharField(max_length=64, choices=INVITEES_CHOICES, null=True, default=None)
 
     ONE_MINUTE = datetime.timedelta(minutes=1)
     FIVE_MINUTES = datetime.timedelta(minutes=5)
@@ -433,6 +454,8 @@ class EscalationPolicy(OrderedModel):
                 result["from_time"] = self.from_time.isoformat() + " (UTC)"
             if self.to_time:
                 result["to_time"] = self.to_time.isoformat() + " (UTC)"
+        elif self.step == EscalationPolicy.STEP_CREATE_CALENDAR_INVITE and self.invitees:
+            result["invitees"] = self.get_invitees_display()
 
         return result
 

@@ -21,7 +21,7 @@ from rest_framework.views import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.alerts.models import EscalationChain, EscalationPolicy
-from apps.api.permissions import RBACPermission
+from apps.api.permissions import RBACPermission, get_schedule_management_write_permissions
 from apps.api.serializers.schedule_base import ScheduleFastSerializer
 from apps.api.serializers.schedule_polymorphic import (
     PolymorphicScheduleCreateSerializer,
@@ -94,11 +94,11 @@ class ScheduleView(
         "mention_options": [RBACPermission.Permissions.SCHEDULES_READ],
         "related_escalation_chains": [RBACPermission.Permissions.SCHEDULES_READ],
         "current_user_events": [RBACPermission.Permissions.SCHEDULES_READ],
-        "create": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "partial_update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "destroy": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "reload_ical": [RBACPermission.Permissions.SCHEDULES_WRITE],
+        "create": get_schedule_management_write_permissions,
+        "update": get_schedule_management_write_permissions,
+        "partial_update": get_schedule_management_write_permissions,
+        "destroy": get_schedule_management_write_permissions,
+        "reload_ical": get_schedule_management_write_permissions,
         "export_token": [RBACPermission.Permissions.SCHEDULES_EXPORT],
         "filters": [RBACPermission.Permissions.SCHEDULES_READ],
     }

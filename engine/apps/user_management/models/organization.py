@@ -3,6 +3,7 @@ import typing
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MinLengthValidator
 from django.db import models
 from django.db.models import Count, JSONField, Q
@@ -34,6 +35,7 @@ if typing.TYPE_CHECKING:
     )
     from apps.mobile_app.models import MobileAppAuthToken
     from apps.schedules.models import CustomOnCallShift, OnCallSchedule
+    from apps.social_auth.types import GoogleOauth2Response
     from apps.slack.models import SlackChannel, SlackTeamIdentity
     from apps.telegram.models import TelegramToOrganizationConnector
     from apps.user_management.models import Region, Team, User
@@ -174,6 +176,43 @@ class Organization(MaintainableObject):
     uuid = models.UUIDField(default=uuid.uuid4, editable=False)
 
     deleted_at = models.DateTimeField(null=True)
+
+    @property
+    def has_google_oauth2_organization_connected(self) -> bool:
+        try:
+            return self.google_oauth2_organization is not None
+        except ObjectDoesNotExist:
+            return False
+
+    def save_google_oauth2_organization_settings(
+        self, google_oauth2_response: "GoogleOauth2Response", connected_by: typing.Optional["User"] = None
+    ) -> None:
+        from apps.google.models import GoogleOAuth2Organization
+
+        existing_refresh_token = GoogleOAuth2Organization.objects.filter(organization=self).values_list(
+            "refresh_token", flat=True
+        ).first()
+        refresh_token = google_oauth2_response.get("refresh_token") or existing_refresh_token
+
+        if not refresh_token:
+            raise ValueError("Google OAuth2 response did not include a refresh token")
+
+        GoogleOAuth2Organization.objects.update_or_create(
+            organization=self,
+            defaults={
+                "connected_by": connected_by,
+                "google_user_id": google_oauth2_response.get("sub"),
+                "google_user_email": google_oauth2_response.get("email"),
+                "access_token": google_oauth2_response.get("access_token"),
+                "refresh_token": refresh_token,
+                "oauth_scope": google_oauth2_response.get("scope"),
+            },
+        )
+
+    def reset_google_oauth2_organization_settings(self) -> None:
+        from apps.google.models import GoogleOAuth2Organization
+
+        GoogleOAuth2Organization.objects.filter(organization=self).delete()
 
     # Organization Settings configured from slack
     (

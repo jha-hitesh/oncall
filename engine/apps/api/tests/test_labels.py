@@ -1,249 +1,206 @@
-from unittest.mock import patch
-
 import pytest
+from django.conf import settings as django_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.response import Response
 from rest_framework.test import APIClient
 
 from apps.api.permissions import LegacyAccessControlRole
+from apps.labels.models import LabelKeyCache, LabelValueCache
 
 
-class MockResponse:
-    def __init__(self, status_code):
-        self.status_code = status_code
-
-
-@patch(
-    "apps.labels.client.LabelsAPIClient.get_keys",
-    return_value=([{"name": "team", "id": "keyid123"}], MockResponse(status_code=200)),
-)
 @pytest.mark.django_db
-def test_labels_get_keys(
-    mocked_get_labels_keys,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
+def test_labels_get_keys(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team", prescribed=True)
+    LabelValueCache.create_value(key, "platform")
+
     client = APIClient()
     url = reverse("api-internal:get_keys")
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    expected_result = [{"name": "team", "id": "keyid123"}]
 
-    assert mocked_get_labels_keys.called
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json() == [
+        {
+            "id": key.id,
+            "name": "team",
+            "prescribed": True,
+            "is_managed_label": False,
+            "color_code": django_settings.FEATURE_LABELS_KEY_DEFAULT_COLOR,
+            "values_count": 1,
+        }
+    ]
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.get_label_by_key_id",
-    return_value=(
-        {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]},
-        MockResponse(status_code=200),
-    ),
-)
 @pytest.mark.django_db
-def test_get_update_key_get(
-    mocked_get_label_by_key_id,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
+def test_get_update_key_get(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team")
+    value = LabelValueCache.create_value(key, "platform")
+
     client = APIClient()
-    url = reverse("api-internal:get_update_key", kwargs={"key_id": "keyid123"})
+    url = reverse("api-internal:get_update_key", kwargs={"key_id": key.id})
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    expected_result = {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]}
 
-    assert mocked_get_label_by_key_id.called
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json() == {
+        "key": {
+            "id": key.id,
+            "name": "team",
+            "prescribed": False,
+            "is_managed_label": False,
+            "color_code": django_settings.FEATURE_LABELS_KEY_DEFAULT_COLOR,
+            "values_count": 1,
+        },
+        "values": [
+            {"id": value.id, "name": "platform", "prescribed": False, "color_code": django_settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR}
+        ],
+    }
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.rename_key",
-    return_value=(
-        {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]},
-        MockResponse(status_code=200),
-    ),
-)
 @pytest.mark.django_db
-def test_get_update_key_put(
-    mocked_rename_key,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
-    client = APIClient()
-    url = reverse("api-internal:get_update_key", kwargs={"key_id": "keyid123"})
-    data = {"name": "team"}
-    response = client.put(url, format="json", **make_user_auth_headers(user, token), data=data)
-    expected_result = {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]}
+def test_get_update_key_put(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team")
 
-    assert mocked_rename_key.called
+    client = APIClient()
+    url = reverse("api-internal:get_update_key", kwargs={"key_id": key.id})
+    response = client.put(
+        url,
+        format="json",
+        data={"name": "service", "is_managed_label": True, "color_code": "#123456"},
+        **make_user_auth_headers(user, token),
+    )
+
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json()["key"]["name"] == "service"
+    assert response.json()["key"]["is_managed_label"] is True
+    assert response.json()["key"]["color_code"] == "#123456"
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.get_label_by_key_name",
-    return_value=(
-        {"key": {"id": "keyid123", "name": "keyname12"}, "values": [{"id": "valueid123", "name": "yolo"}]},
-        MockResponse(status_code=200),
-    ),
-)
 @pytest.mark.django_db
-def test_get_key_by_name(
-    mocked_get_label_by_key_name,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
+def test_get_key_by_name(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team")
+    value = LabelValueCache.create_value(key, "platform")
+
     client = APIClient()
-    url = reverse("api-internal:get_key_by_name", kwargs={"key_name": "keyname12"})
+    url = reverse("api-internal:get_key_by_name", kwargs={"key_name": "team"})
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    expected_result = {"key": {"id": "keyid123", "name": "keyname12"}, "values": [{"id": "valueid123", "name": "yolo"}]}
 
-    assert mocked_get_label_by_key_name.called
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json() == {
+        "key": {
+            "id": key.id,
+            "name": "team",
+            "prescribed": False,
+            "is_managed_label": False,
+            "color_code": django_settings.FEATURE_LABELS_KEY_DEFAULT_COLOR,
+            "values_count": 1,
+        },
+        "values": [
+            {"id": value.id, "name": "platform", "prescribed": False, "color_code": django_settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR}
+        ],
+    }
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.add_value",
-    return_value=(
-        {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]},
-        MockResponse(status_code=200),
-    ),
-)
 @pytest.mark.django_db
-def test_add_value(
-    mocked_add_value,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
-    client = APIClient()
-    url = reverse("api-internal:add_value", kwargs={"key_id": "keyid123"})
-    data = {"name": "yolo"}
-    response = client.post(url, format="json", **make_user_auth_headers(user, token), data=data)
-    expected_result = {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]}
+def test_add_value(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team")
 
-    assert mocked_add_value.called
+    client = APIClient()
+    url = reverse("api-internal:add_value", kwargs={"key_id": key.id})
+    response = client.post(
+        url,
+        format="json",
+        data={"name": "platform", "color_code": "#abcdef"},
+        **make_user_auth_headers(user, token),
+    )
+
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json()["values"][0]["name"] == "platform"
+    assert response.json()["values"][0]["color_code"] == "#abcdef"
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.rename_value",
-    return_value=(
-        {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]},
-        MockResponse(status_code=200),
-    ),
-)
 @pytest.mark.django_db
-def test_rename_value(
-    mocked_rename_value,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
-    client = APIClient()
-    url = reverse("api-internal:get_update_value", kwargs={"key_id": "keyid123", "value_id": "valueid123"})
-    data = {"name": "yolo"}
-    response = client.put(url, format="json", **make_user_auth_headers(user, token), data=data)
-    expected_result = {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]}
+def test_rename_value(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team")
+    value = LabelValueCache.create_value(key, "platform")
 
-    assert mocked_rename_value.called
+    client = APIClient()
+    url = reverse("api-internal:get_update_value", kwargs={"key_id": key.id, "value_id": value.id})
+    response = client.put(
+        url,
+        format="json",
+        data={"name": "payments", "color_code": "#fedcba"},
+        **make_user_auth_headers(user, token),
+    )
+
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json()["values"][0]["name"] == "payments"
+    assert response.json()["values"][0]["color_code"] == "#fedcba"
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.get_value",
-    return_value=(
-        {"id": "valueid123", "name": "yolo"},
-        MockResponse(status_code=200),
-    ),
-)
 @pytest.mark.django_db
-def test_get_value(
-    mocked_get_value,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
-    _, user, token = make_organization_and_user_with_plugin_token()
+def test_get_value(make_organization_and_user_with_plugin_token, make_user_auth_headers):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    key = LabelKeyCache.create_key(organization, "team")
+    value = LabelValueCache.create_value(key, "platform")
+
     client = APIClient()
-    url = reverse("api-internal:get_update_value", kwargs={"key_id": "keyid123", "value_id": "valueid123"})
+    url = reverse("api-internal:get_update_value", kwargs={"key_id": key.id, "value_id": value.id})
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    expected_result = {"id": "valueid123", "name": "yolo"}
 
-    assert mocked_get_value.called
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == expected_result
+    assert response.json() == {
+        "id": value.id,
+        "name": "platform",
+        "prescribed": False,
+        "color_code": django_settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR,
+    }
 
 
-@patch(
-    "apps.labels.client.LabelsAPIClient.create_label",
-    return_value=(
-        {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]},
-        MockResponse(status_code=201),
-    ),
-)
 @pytest.mark.django_db
-def test_labels_create_label(
-    mocked_create_label,
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-):
+def test_labels_create_label(make_organization_and_user_with_plugin_token, make_user_auth_headers):
     _, user, token = make_organization_and_user_with_plugin_token()
+
     client = APIClient()
     url = reverse("api-internal:create_label")
-    data = {"key": {"name": "team"}, "values": [{"name": "yolo"}]}
-    expected_result = {"key": {"id": "keyid123", "name": "team"}, "values": [{"id": "valueid123", "name": "yolo"}]}
-    response = client.post(url, format="json", data=data, **make_user_auth_headers(user, token))
+    response = client.post(
+        url,
+        format="json",
+        data={
+            "key": {"name": "team", "is_managed_label": True, "color_code": "#112233"},
+            "values": [{"name": "platform", "color_code": "#445566"}],
+        },
+        **make_user_auth_headers(user, token),
+    )
 
-    assert mocked_create_label.called
     assert response.status_code == status.HTTP_201_CREATED
-    assert response.json() == expected_result
+    assert response.json()["key"]["name"] == "team"
+    assert response.json()["key"]["is_managed_label"] is True
+    assert response.json()["key"]["color_code"] == "#112233"
+    assert response.json()["values"][0]["name"] == "platform"
+    assert response.json()["values"][0]["color_code"] == "#445566"
 
 
 @pytest.mark.django_db
-def test_labels_feature_false(
-    make_organization_and_user_with_plugin_token,
-    make_user_auth_headers,
-    settings,
-):
+def test_labels_feature_false(make_organization_and_user_with_plugin_token, make_user_auth_headers, settings):
     settings.FEATURE_LABELS_ENABLED_FOR_ALL = False
 
     _, user, token = make_organization_and_user_with_plugin_token()
     client = APIClient()
 
-    url = reverse("api-internal:get_keys")
-    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+    response = client.get(reverse("api-internal:get_keys"), format="json", **make_user_auth_headers(user, token))
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    url = reverse("api-internal:get_update_key", kwargs={"key_id": "keyid123"})
-    response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    url = reverse("api-internal:get_update_key", kwargs={"key_id": "keyid123"})
-    response = client.put(url, format="json", **make_user_auth_headers(user, token), data={})
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    url = reverse("api-internal:add_value", kwargs={"key_id": "keyid123"})
-    response = client.post(url, format="json", **make_user_auth_headers(user, token), data={})
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    url = reverse("api-internal:get_update_value", kwargs={"key_id": "keyid123", "value_id": "valueid123"})
-    response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    url = reverse("api-internal:get_update_value", kwargs={"key_id": "keyid123", "value_id": "valueid123"})
-    response = client.put(url, format="json", **make_user_auth_headers(user, token), data={})
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    url = reverse("api-internal:create_label")
-    response = client.post(url, format="json", data={}, **make_user_auth_headers(user, token))
+    response = client.post(
+        reverse("api-internal:create_label"),
+        format="json",
+        data={"key": {"name": "team"}, "values": []},
+        **make_user_auth_headers(user, token),
+    )
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
@@ -263,22 +220,27 @@ def test_labels_permissions_get_actions(
     role,
     expected_status,
 ):
-    _, user, token = make_organization_and_user_with_plugin_token(role)
+    organization, user, token = make_organization_and_user_with_plugin_token(role)
+    key = LabelKeyCache.create_key(organization, "team")
+    value = LabelValueCache.create_value(key, "platform")
     client = APIClient()
-    with patch("apps.api.views.labels.LabelsViewSet.get_keys", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:get_keys")
-        response = client.get(url, format="json", **make_user_auth_headers(user, token))
-        assert response.status_code == expected_status
 
-    with patch("apps.api.views.labels.LabelsViewSet.get_key", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:get_update_key", kwargs={"key_id": "keyid123"})
-        response = client.get(url, format="json", **make_user_auth_headers(user, token))
-        assert response.status_code == expected_status
+    response = client.get(reverse("api-internal:get_keys"), format="json", **make_user_auth_headers(user, token))
+    assert response.status_code == expected_status
 
-    with patch("apps.api.views.labels.LabelsViewSet.get_value", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:get_update_value", kwargs={"key_id": "keyid123", "value_id": "valueid123"})
-        response = client.get(url, format="json", **make_user_auth_headers(user, token), data={})
-        assert response.status_code == expected_status
+    response = client.get(
+        reverse("api-internal:get_update_key", kwargs={"key_id": key.id}),
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+    assert response.status_code == expected_status
+
+    response = client.get(
+        reverse("api-internal:get_update_value", kwargs={"key_id": key.id, "value_id": value.id}),
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+    assert response.status_code == expected_status
 
 
 @pytest.mark.django_db
@@ -286,7 +248,7 @@ def test_labels_permissions_get_actions(
     "role,expected_status",
     [
         (LegacyAccessControlRole.ADMIN, status.HTTP_200_OK),
-        (LegacyAccessControlRole.EDITOR, status.HTTP_200_OK),
+        (LegacyAccessControlRole.EDITOR, status.HTTP_403_FORBIDDEN),
         (LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
         (LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
     ],
@@ -297,27 +259,43 @@ def test_labels_permissions_create_update_actions(
     role,
     expected_status,
 ):
-    _, user, token = make_organization_and_user_with_plugin_token(role)
+    organization, user, token = make_organization_and_user_with_plugin_token(role)
+    key = LabelKeyCache.create_key(organization, "team")
+    value = LabelValueCache.create_value(key, "platform")
     client = APIClient()
-    with patch("apps.api.views.labels.LabelsViewSet.rename_key", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:get_update_key", kwargs={"key_id": "keyid123"})
-        response = client.put(url, format="json", **make_user_auth_headers(user, token), data={})
-        assert response.status_code == expected_status
 
-    with patch("apps.api.views.labels.LabelsViewSet.add_value", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:add_value", kwargs={"key_id": "keyid123"})
-        response = client.post(url, format="json", **make_user_auth_headers(user, token), data={})
-        assert response.status_code == expected_status
+    response = client.put(
+        reverse("api-internal:get_update_key", kwargs={"key_id": key.id}),
+        format="json",
+        data={"name": "service"},
+        **make_user_auth_headers(user, token),
+    )
+    assert response.status_code == expected_status
 
-    with patch("apps.api.views.labels.LabelsViewSet.rename_value", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:get_update_value", kwargs={"key_id": "keyid123", "value_id": "valueid123"})
-        response = client.put(url, format="json", **make_user_auth_headers(user, token), data={})
-        assert response.status_code == expected_status
+    response = client.post(
+        reverse("api-internal:add_value", kwargs={"key_id": key.id}),
+        format="json",
+        data={"name": "payments"},
+        **make_user_auth_headers(user, token),
+    )
+    assert response.status_code == expected_status
 
-    with patch("apps.api.views.labels.LabelsViewSet.create_label", return_value=Response(status=status.HTTP_200_OK)):
-        url = reverse("api-internal:create_label")
-        response = client.post(url, format="json", data={}, **make_user_auth_headers(user, token))
-        assert response.status_code == expected_status
+    response = client.put(
+        reverse("api-internal:get_update_value", kwargs={"key_id": key.id, "value_id": value.id}),
+        format="json",
+        data={"name": "infra"},
+        **make_user_auth_headers(user, token),
+    )
+    assert response.status_code == expected_status
+
+    response = client.post(
+        reverse("api-internal:create_label"),
+        format="json",
+        data={"key": {"name": "another-service"}, "values": []},
+        **make_user_auth_headers(user, token),
+    )
+    expected_create_status = status.HTTP_201_CREATED if expected_status == status.HTTP_200_OK else expected_status
+    assert response.status_code == expected_create_status
 
 
 @pytest.mark.django_db
@@ -326,12 +304,14 @@ def test_alert_group_labels_get_keys(
     make_alert_receive_channel,
     make_alert_group,
     make_alert_group_label_association,
+    make_label_key,
     make_user_auth_headers,
 ):
     organization, user, token = make_organization_and_user_with_plugin_token()
 
     alert_receive_channel = make_alert_receive_channel(user.organization)
     alert_group = make_alert_group(alert_receive_channel)
+    make_label_key(organization, key_name="a", color_code="#112233")
     make_alert_group_label_association(organization, alert_group, key_name="a", value_name="b")
 
     client = APIClient()
@@ -339,7 +319,7 @@ def test_alert_group_labels_get_keys(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == [{"id": "a", "name": "a"}]
+    assert response.json() == [{"id": "a", "name": "a", "color_code": "#112233"}]
 
 
 @pytest.mark.django_db
@@ -348,12 +328,14 @@ def test_alert_group_labels_get_key(
     make_alert_receive_channel,
     make_alert_group,
     make_alert_group_label_association,
+    make_label_key_and_value,
     make_user_auth_headers,
 ):
     organization, user, token = make_organization_and_user_with_plugin_token()
 
     alert_receive_channel = make_alert_receive_channel(user.organization)
     alert_group = make_alert_group(alert_receive_channel)
+    make_label_key_and_value(organization, key_name="a", value_name="b")
     make_alert_group_label_association(organization, alert_group, key_name="a", value_name="b")
 
     client = APIClient()
@@ -361,4 +343,7 @@ def test_alert_group_labels_get_key(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"key": {"id": "a", "name": "a"}, "values": [{"id": "b", "name": "b"}]}
+    assert response.json() == {
+        "key": {"id": "a", "name": "a", "color_code": django_settings.FEATURE_LABELS_KEY_DEFAULT_COLOR},
+        "values": [{"id": "b", "name": "b", "color_code": django_settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR}],
+    }

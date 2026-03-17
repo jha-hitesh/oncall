@@ -1,0 +1,8 @@
+apiVersion: v1
+appVersion: "0.0.1"
+description: A Helm chart for deploying Python Celery Flower to Kubernetes
+name: celery-flower
+version: 0.0.2
+icon: https://en.wikipedia.org/wiki/Celery_(software)#/media/File:Celery_logo.png
+sources:
+  - https://github.com/mher/flower

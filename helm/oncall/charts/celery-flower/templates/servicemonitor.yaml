@@ -1,0 +1,45 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ template "celery-flower.fullname" . }}
+  labels:
+    app: {{ template "celery-flower.name" . }}
+    chart: {{ template "celery-flower.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- with .Values.serviceMonitor.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+  {{- with .Values.serviceMonitor.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "celery-flower.name" . }}
+      release: {{ .Release.Name }}
+  {{- if .Values.serviceMonitor.namespace }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.serviceMonitor.namespace | quote }}
+  {{- end }}
+  endpoints:
+    - port: http
+      interval: {{ .Values.serviceMonitor.interval }}
+      path: {{ .Values.serviceMonitor.path }}
+      scheme: {{ .Values.serviceMonitor.scheme }}
+      honorLabels: {{ .Values.serviceMonitor.honorLabels }}
+      {{- if .Values.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+      {{- end }}
+      {{- with .Values.serviceMonitor.relabelings }}
+      relabelings:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+{{- end }}

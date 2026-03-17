@@ -2,7 +2,6 @@ import React from 'react';
 
 import { css, cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { LabelTag } from '@grafana/labels';
 import {
   Button,
   Stack,
@@ -14,13 +13,13 @@ import {
   Themeable2,
   useStyles2,
 } from '@grafana/ui';
-import { sanitize } from 'dompurify';
 import { LocationHelper } from 'helpers/LocationHelper';
 import { UserActions } from 'helpers/authorization/authorization';
 import { INTEGRATION_SERVICENOW, StackSize, PLUGIN_ROOT } from 'helpers/consts';
 import { openNotification, openErrorNotification } from 'helpers/helpers';
 import { PropsWithRouter, withRouter, withDrawer } from 'helpers/hoc';
 import { getItem, setItem } from 'helpers/localStorage';
+import { sanitize } from 'helpers/sanitize';
 import { get } from 'lodash-es';
 import { observer } from 'mobx-react';
 import moment from 'moment-timezone';
@@ -35,6 +34,7 @@ import { IntegrationHowToConnect } from 'components/IntegrationHowToConnect/Inte
 import { IntegrationLogoWithTitle } from 'components/IntegrationLogo/IntegrationLogoWithTitle';
 import { IntegrationBlock } from 'components/Integrations/IntegrationBlock';
 import { IntegrationTag } from 'components/Integrations/IntegrationTag';
+import { ColoredLabelTag, toColoredLabelParts } from 'components/ColoredLabelTag/ColoredLabelTag';
 import { PageErrorHandlingWrapper, PageBaseState } from 'components/PageErrorHandlingWrapper/PageErrorHandlingWrapper';
 import { initErrorDataState } from 'components/PageErrorHandlingWrapper/PageErrorHandlingWrapper.helpers';
 import { PluginLink } from 'components/PluginLink/PluginLink';
@@ -881,7 +881,7 @@ const IntegrationHeader: React.FC<IntegrationHeaderProps> = ({
           tooltipContent={
             <Stack direction="column" gap={StackSize.sm}>
               {alertReceiveChannel.labels.map((label) => (
-                <LabelTag label={label.key.name} value={label.value.name} key={label.key.id} />
+                <ColoredLabelTag key={label.key.id} {...toColoredLabelParts(label)} />
               ))}
             </Stack>
           }

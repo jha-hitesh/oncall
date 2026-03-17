@@ -11,12 +11,14 @@ import { goToOnCallPage } from '../utils/navigation';
 
 test('we can directly page a user', async ({ adminRolePage }) => {
   const message = 'Help me please!';
+  const detailedDescription = 'Database latency spiked and customer checkouts are failing intermittently.';
   const { page } = adminRolePage;
 
   await goToOnCallPage(page, 'alert-groups');
   await page.waitForTimeout(1000);
   await clickButton({ page, buttonText: 'Escalation' });
   await fillInInput(page, 'textarea[name="message"]', message);
+  await fillInInput(page, 'textarea[name="detailed_description"]', detailedDescription);
   await clickButton({ page, buttonText: 'Invite' });
 
   const addRespondersPopup = page.getByTestId('add-responders-popup');

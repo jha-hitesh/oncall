@@ -160,6 +160,8 @@ class Webhook(models.Model):
     url = models.TextField(null=True, default=None)
     data = models.TextField(null=True, default=None)
     forward_all = models.BooleanField(default=True)
+    add_response_to_timeline = models.BooleanField(default=False)
+    response_template = models.TextField(null=True, default=None)
     http_method = models.CharField(max_length=32, default="POST", null=True)
     trigger_type = models.IntegerField(choices=TRIGGER_TYPES, default=TRIGGER_MANUAL, null=True)
     is_webhook_enabled = models.BooleanField(null=True, default=True)

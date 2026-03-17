@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.api.permissions import RBACPermission
+from apps.api.permissions import RBACPermission, get_schedule_management_write_permissions
 from apps.api.serializers.on_call_shifts import OnCallShiftSerializer, OnCallShiftUpdateSerializer
 from apps.auth_token.auth import PluginAuthentication
 from apps.schedules.models import CustomOnCallShift
@@ -32,10 +32,10 @@ class OnCallShiftView(
         "details": [RBACPermission.Permissions.SCHEDULES_READ],
         "frequency_options": [RBACPermission.Permissions.SCHEDULES_READ],
         "days_options": [RBACPermission.Permissions.SCHEDULES_READ],
-        "create": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "partial_update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "destroy": [RBACPermission.Permissions.SCHEDULES_WRITE],
+        "create": get_schedule_management_write_permissions,
+        "update": get_schedule_management_write_permissions,
+        "partial_update": get_schedule_management_write_permissions,
+        "destroy": get_schedule_management_write_permissions,
         "preview": [RBACPermission.Permissions.SCHEDULES_WRITE],
     }
 

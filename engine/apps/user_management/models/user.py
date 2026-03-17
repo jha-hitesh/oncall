@@ -414,12 +414,18 @@ class User(models.Model):
             f"oauth_scope={google_oauth2_response.get('scope')}"
         )
 
+        existing_refresh_token = GoogleOAuth2User.objects.filter(user=self).values_list("refresh_token", flat=True).first()
+        refresh_token = google_oauth2_response.get("refresh_token") or existing_refresh_token
+
+        if not refresh_token:
+            raise ValueError("Google OAuth2 response did not include a refresh token")
+
         _, created = GoogleOAuth2User.objects.update_or_create(
             user=self,
             defaults={
                 "google_user_id": google_oauth2_response.get("sub"),
                 "access_token": google_oauth2_response.get("access_token"),
-                "refresh_token": google_oauth2_response.get("refresh_token"),
+                "refresh_token": refresh_token,
                 "oauth_scope": google_oauth2_response.get("scope"),
             },
         )

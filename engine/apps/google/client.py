@@ -1,6 +1,7 @@
 import datetime
 import logging
 import typing
+import uuid
 
 from django.conf import settings
 from google.auth.exceptions import RefreshError
@@ -10,6 +11,7 @@ from googleapiclient.errors import HttpError
 
 from apps.google import constants, utils
 from apps.google.types import GoogleCalendarEvent as GoogleCalendarEventType
+from apps.google.types import GoogleCalendarInsertResponse
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -72,6 +74,12 @@ class GoogleCalendarAPIClient:
         )
 
         self.service = build("calendar", "v3", credentials=credentials)
+
+    @staticmethod
+    def _serialize_datetime(dt: datetime.datetime) -> str:
+        if dt.tzinfo is None:
+            raise ValueError("Google Calendar datetimes must be timezone-aware")
+        return dt.isoformat(timespec="seconds")
 
     def fetch_out_of_office_events(self) -> typing.List[GoogleCalendarEvent]:
         """
@@ -146,3 +154,82 @@ class GoogleCalendarAPIClient:
             raise GoogleCalendarRefreshError(e)
 
         return [GoogleCalendarEvent(event) for event in events_result.get("items", [])]
+
+    def check_primary_calendar_access(self) -> None:
+        """
+        Perform a lightweight read against the primary calendar to validate the current token pair.
+        """
+        now = datetime.datetime.now(datetime.UTC)
+        time_min = utils.datetime_strftime(now)
+
+        try:
+            (
+                self.service.events()
+                .list(
+                    calendarId=self.CALENDAR_ID,
+                    timeMin=time_min,
+                    maxResults=1,
+                    singleEvents=True,
+                    orderBy="startTime",
+                )
+                .execute()
+            )
+        except HttpError as e:
+            if getattr(e, "status_code", None) == 403:
+                logger.error(f"GoogleCalendarAPIClient - HttpError 403 when checking calendar access: {e}")
+                raise GoogleCalendarUnauthorizedHTTPError(e)
+
+            logger.error(f"GoogleCalendarAPIClient - HttpError when checking calendar access: {e}")
+            raise GoogleCalendarGenericHTTPError(e)
+        except RefreshError as e:
+            logger.error(f"GoogleCalendarAPIClient - RefreshError when checking calendar access: {e}")
+            raise GoogleCalendarRefreshError(e)
+
+    def create_event(
+        self,
+        summary: str,
+        start: datetime.datetime,
+        end: datetime.datetime,
+        attendees: typing.Iterable[str] | None = None,
+        description: str | None = None,
+    ) -> GoogleCalendarInsertResponse:
+        body: dict[str, typing.Any] = {
+            "summary": summary,
+            "start": {"dateTime": self._serialize_datetime(start)},
+            "end": {"dateTime": self._serialize_datetime(end)},
+            "conferenceData": {
+                "createRequest": {
+                    "requestId": str(uuid.uuid4()),
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                }
+            },
+        }
+
+        if description:
+            body["description"] = description
+
+        attendee_list = [{"email": email} for email in (attendees or [])]
+        if attendee_list:
+            body["attendees"] = attendee_list
+
+        try:
+            return (
+                self.service.events()
+                .insert(
+                    calendarId=self.CALENDAR_ID,
+                    conferenceDataVersion=1,
+                    sendUpdates="all",
+                    body=body,
+                )
+                .execute()
+            )
+        except HttpError as e:
+            if getattr(e, "status_code", None) == 403:
+                logger.error(f"GoogleCalendarAPIClient - HttpError 403 when creating event: {e}")
+                raise GoogleCalendarUnauthorizedHTTPError(e)
+
+            logger.error(f"GoogleCalendarAPIClient - HttpError when creating event: {e}")
+            raise GoogleCalendarGenericHTTPError(e)
+        except RefreshError as e:
+            logger.error(f"GoogleCalendarAPIClient - RefreshError when creating event: {e}")
+            raise GoogleCalendarRefreshError(e)

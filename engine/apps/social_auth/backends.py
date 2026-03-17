@@ -73,6 +73,10 @@ class GoogleOAuth2(BaseGoogleOAuth2):
         return params
 
 
+class OrganizationGoogleOAuth2(GoogleOAuth2):
+    name = "google-oauth2-org"
+
+
 class SlackOAuth2V2(SlackOAuth2):
     """
     Reference to Slack tokens: https://api.slack.com/authentication/token-types

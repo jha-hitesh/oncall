@@ -99,6 +99,7 @@ export const PersonalNotificationSettings = observer((props: PersonalNotificatio
   const isCurrent = store.userStore.currentUserPk === userPk;
 
   const user = userStore.items[userPk];
+  const hasCloudConnection = store.hasFeature(AppFeature.CloudConnection);
 
   const userAction = isCurrent ? UserActions.UserSettingsWrite : UserActions.NotificationSettingsWrite;
   const getPhoneStatus = () => {
@@ -110,8 +111,10 @@ export const PersonalNotificationSettings = observer((props: PersonalNotificatio
 
   // Mobile app related NotificationPolicy props
   const isMobileAppConnected = user.messaging_backends['MOBILE_APP']?.connected;
-  const showCloudConnectionWarning =
-    store.hasFeature(AppFeature.CloudConnection) && !store.cloudStore.cloudConnectionStatus.cloud_connection_status;
+  const showCloudConnectionWarning = hasCloudConnection && !store.cloudStore.cloudConnectionStatus.cloud_connection_status;
+  const notifyByOptions = hasCloudConnection
+    ? userStore.notifyByOptions
+    : userStore.notifyByOptions.filter((option: { value: number }) => option.value !== 5 && option.value !== 6);
 
   return (
     <div className={styles.root}>
@@ -142,7 +145,7 @@ export const PersonalNotificationSettings = observer((props: PersonalNotificatio
             onDelete={getNotificationPolicyDeleteHandler}
             notificationChoices={get(userStore.notificationChoices, 'step.choices', [])}
             waitDelays={get(userStore.notificationChoices, 'wait_delay.choices', [])}
-            notifyByOptions={userStore.notifyByOptions}
+            notifyByOptions={notifyByOptions}
             color={getColor(index)}
             store={store}
           />

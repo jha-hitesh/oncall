@@ -47,6 +47,7 @@ x-extra-hosts: &oncall-extra-hosts
 services:
   oncall_ui:
     container_name: oncall_ui
+    hostname: oncall_ui
     labels: *oncall-labels
     build:
       context: ./grafana-plugin
@@ -60,6 +61,7 @@ services:
 
   oncall_engine:
     container_name: oncall_engine
+    hostname: oncall-engine
     labels: *oncall-labels
     build: *oncall-build-args
     restart: always
@@ -71,6 +73,10 @@ services:
     extra_hosts: *oncall-extra-hosts
     ports:
       - "8080:8080"
+    networks:
+      default:
+        aliases:
+          - oncall-engine
     depends_on:
       oncall_db_migration:
         condition: service_completed_successfully
@@ -79,6 +85,7 @@ services:
 
   oncall_telegram_polling:
     container_name: oncall_telegram_polling
+    hostname: oncall_telegram_polling
     labels: *oncall-labels
     build: *oncall-build-args
     restart: always
@@ -100,6 +107,7 @@ services:
   # duplicating the env-files, volume mounts, etc in the Makefile
   oncall_engine_commands:
     container_name: oncall_engine_commands
+    hostname: oncall_engine_commands
     labels: *oncall-labels
     build: *oncall-build-args
     user: *oncall-user
@@ -113,6 +121,7 @@ services:
 
   oncall_celery:
     container_name: oncall_celery
+    hostname: oncall_celery
     labels: *oncall-labels
     build: *oncall-build-args
     restart: always
@@ -129,7 +138,8 @@ services:
       - engine
 
   flower:
-    container_name: flower
+    container_name: oncall_flower
+    hostname: flower
     labels: *oncall-labels
     image: mher/flower:1.2.0
     environment:
@@ -145,6 +155,7 @@ services:
 
   oncall_db_migration:
     container_name: oncall_db_migration
+    hostname: oncall_db_migration
     labels: *oncall-labels
     build: *oncall-build-args
     user: *oncall-user
@@ -170,7 +181,8 @@ services:
       - engine
 
   redis:
-    container_name: redis
+    container_name: oncall_redis
+    hostname: redis
     labels: *oncall-labels
     image: redis:7.0.15
     restart: always
@@ -193,7 +205,8 @@ services:
       - redis
 
   rabbitmq:
-    container_name: rabbitmq
+    container_name: oncall_rabbitmq
+    hostname: rabbitmq
     labels: *oncall-labels
     image: "rabbitmq:3.12.0-management"
     restart: always
@@ -221,7 +234,8 @@ services:
       - rabbitmq
 
   mysql:
-    container_name: mysql
+    container_name: oncall_mysql
+    hostname: mysql
     labels: *oncall-labels
     image: mysql:8.0.32
     command: >-
@@ -250,6 +264,7 @@ services:
 
   mysql_to_create_grafana_db:
     container_name: mysql_to_create_grafana_db
+    hostname: mysql_to_create_grafana_db
     labels: *oncall-labels
     image: mysql:8.0.32
     command: >-
@@ -262,7 +277,8 @@ services:
       - mysql
 
   postgres:
-    container_name: postgres
+    container_name: oncall_postgres
+    hostname: postgres
     labels: *oncall-labels
     image: postgres:14.4
     restart: always
@@ -290,6 +306,7 @@ services:
 
   postgres_to_create_grafana_db:
     container_name: postgres_to_create_grafana_db
+    hostname: postgres_to_create_grafana_db
     labels: *oncall-labels
     image: postgres:14.4
     command: >-
@@ -303,7 +320,8 @@ services:
       - postgres
 
   prometheus:
-    container_name: prometheus
+    container_name: oncall_prometheus
+    hostname: prometheus
     labels: *oncall-labels
     image: prom/prometheus
     volumes:
@@ -314,16 +332,17 @@ services:
       - prometheus
 
   grafana:
-    container_name: grafana
+    container_name: oncall_grafana
+    hostname: grafana
     labels: *oncall-labels
-    image: "grafana/${GRAFANA_IMAGE:-grafana:latest}"
+    image: "grafana/${GRAFANA_IMAGE:-grafana:11.2.0}"
     restart: always
     environment:
       GF_SECURITY_ADMIN_USER: oncall
       GF_SECURITY_ADMIN_PASSWORD: oncall
       GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: grafana-oncall-app
       GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts
-      ONCALL_API_URL: http://host.docker.internal:8080
+      ONCALL_API_URL: http://oncall-engine:8080
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: true
     env_file:
       - ./dev/.env.${DB}.dev
@@ -339,7 +358,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - grafanadata_dev:/var/lib/grafana
-      - ./grafana-plugin:/var/lib/grafana/plugins/grafana-plugin
+      - ./grafana-plugin/dist:/var/lib/grafana/plugins/grafana-oncall-app
       - ./dev/grafana/provisioning:/etc/grafana/provisioning
       - ${GRAFANA_DEV_PROVISIONING:-/dev/null}:/etc/grafana/grafana.ini
     depends_on:

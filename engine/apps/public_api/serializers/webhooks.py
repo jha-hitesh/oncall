@@ -79,6 +79,8 @@ class WebhookCreateSerializer(EagerLoadingMixin, serializers.ModelSerializer):
             "headers",
             "url",
             "forward_all",
+            "add_response_to_timeline",
+            "response_template",
             "http_method",
             "trigger_type",
             "integration_filter",
@@ -95,6 +97,8 @@ class WebhookCreateSerializer(EagerLoadingMixin, serializers.ModelSerializer):
             "headers": {"required": False, "allow_null": True, "allow_blank": True},
             "data": {"required": False, "allow_null": True, "allow_blank": True},
             "forward_all": {"required": False, "allow_null": False},
+            "add_response_to_timeline": {"required": False, "allow_null": False},
+            "response_template": {"required": False, "allow_null": True, "allow_blank": True},
         }
 
         validators = [UniqueTogetherValidator(queryset=Webhook.objects.all(), fields=["name", "organization"])]
@@ -138,6 +142,11 @@ class WebhookCreateSerializer(EagerLoadingMixin, serializers.ModelSerializer):
         if not headers:
             return None
         return self._validate_template_field(headers)
+
+    def validate_response_template(self, response_template):
+        if not response_template:
+            return None
+        return self._validate_template_field(response_template)
 
     def validate_url(self, url):
         if not url:
@@ -195,5 +204,7 @@ class WebhookUpdateSerializer(WebhookCreateSerializer):
             "url": {"required": False, "allow_null": False, "allow_blank": False},
             "data": {"required": False, "allow_null": True, "allow_blank": True},
             "forward_all": {"required": False, "allow_null": False},
+            "add_response_to_timeline": {"required": False, "allow_null": False},
+            "response_template": {"required": False, "allow_null": True, "allow_blank": True},
             "http_method": {"required": False, "allow_null": False, "allow_blank": False},
         }

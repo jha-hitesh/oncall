@@ -6,6 +6,7 @@ class GoogleOauth2Response(typing.TypedDict):
     scope: str
     access_token: str
     refresh_token: typing.Optional[str]
+    email: typing.NotRequired[str]
     """
     NOTE: I think `refresh_token` is only included when the user initially grants access to our Google OAuth2 app
     on subsequent logins, the `refresh_token` is not included in the response, only `access_token`

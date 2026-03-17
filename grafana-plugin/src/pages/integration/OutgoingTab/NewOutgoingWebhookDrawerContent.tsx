@@ -23,13 +23,16 @@ export const NewOutgoingWebhookDrawerContent: FC<NewOutgoingWebhookDrawerContent
   const commonStyles = useCommonStyles();
   const formMethods = useForm<OutgoingTabFormValues>({
     mode: 'onChange',
-    defaultValues: { is_webhook_enabled: false },
+    defaultValues: { is_webhook_enabled: false, add_response_to_timeline: false },
   });
   const integrationId = useIntegrationIdFromUrl();
 
   const onSubmit = async (values: OutgoingTabFormValues) => {
     if (!values.triggerTemplateToogle) {
       values.trigger_template = null;
+    }
+    if (!values.add_response_to_timeline) {
+      values.response_template = null;
     }
     await alertReceiveChannelWebhooksStore.create(integrationId, { ...values, name: `${new Date().getTime()}` });
     closeDrawer();

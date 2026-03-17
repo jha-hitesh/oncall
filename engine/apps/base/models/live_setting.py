@@ -50,6 +50,8 @@ class LiveSetting(models.Model):
         "TWILIO_API_KEY_SECRET",
         "TWILIO_NUMBER",
         "TWILIO_VERIFY_SERVICE_SID",
+        "PHONE_CALL_INSTRUCTIONS_TEMPLATE",
+        "PHONE_CALL_INSTRUCTIONS_CONFIG",
         "TELEGRAM_TOKEN",
         "TELEGRAM_WEBHOOK_HOST",
         "SLACK_CLIENT_OAUTH_ID",
@@ -158,6 +160,16 @@ class LiveSetting(models.Model):
             "SID of Twilio service for number verification. "
             "You can create a service in Twilio web interface. "
             "twilio.com -> verify -> create new service."
+        ),
+        "PHONE_CALL_INSTRUCTIONS_TEMPLATE": (
+            "Twilio phone-call instructions template. Available placeholders: "
+            "acknowledge_button, resolve_button, silence_button, repeat_button, silence_in_minutes."
+        ),
+        "PHONE_CALL_INSTRUCTIONS_CONFIG": (
+            "Twilio phone-call instructions JSON config. Supported keys: "
+            "acknowledge_button, resolve_button, silence_button, repeat_button, "
+            "acknowledge_message, resolve_message, silence_message, "
+            "silence_in_minutes, wait_time_for_user_action."
         ),
         "TELEGRAM_TOKEN": (
             "Secret token for Telegram bot, you can get one via <a href='https://t.me/BotFather' target='_blank'>BotFather</a>."

@@ -101,6 +101,10 @@ class SlackAPIFetchMembersFailedError(SlackAPIError):
     errors = ("fetch_members_failed",)
 
 
+class SlackAPIAlreadyInChannelError(SlackAPIError):
+    errors = ("already_in_channel",)
+
+
 class SlackAPIViewNotFoundError(SlackAPIError):
     errors = ("not_found",)
 

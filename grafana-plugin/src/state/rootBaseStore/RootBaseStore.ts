@@ -62,6 +62,12 @@ export class RootBaseStore {
   features?: { [key: string]: boolean };
 
   @observable
+  labelKeyDefaultColor = '#42f566';
+
+  @observable
+  labelValueDefaultColor = '#f54b75';
+
+  @observable
   pageTitle = '';
 
   @observable
@@ -148,15 +154,20 @@ export class RootBaseStore {
   @action.bound
   async updateFeatures() {
     const response = await makeRequest('/features/', {});
+    const enabledFeatures = Array.isArray(response) ? response : response.enabled_features;
 
     runInAction(() => {
-      this.features = response.reduce(
+      this.features = enabledFeatures.reduce(
         (acc: any, key: string) => ({
           ...acc,
           [key]: true,
         }),
         {}
       );
+      if (!Array.isArray(response)) {
+        this.labelKeyDefaultColor = response.label_key_default_color;
+        this.labelValueDefaultColor = response.label_value_default_color;
+      }
     });
   }
 

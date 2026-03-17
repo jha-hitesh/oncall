@@ -3,6 +3,7 @@ import React, { forwardRef, useImperativeHandle, useState } from 'react';
 import { css } from '@emotion/css';
 import { ServiceLabelsProps, ServiceLabels } from '@grafana/labels';
 import { Field, Label } from '@grafana/ui';
+import { UserActions, isUserActionAllowed } from 'helpers/authorization/authorization';
 import { GENERIC_ERROR } from 'helpers/consts';
 import { openErrorNotification } from 'helpers/helpers';
 import { isEmpty } from 'lodash-es';
@@ -29,6 +30,7 @@ const _Labels = observer(
     const [value, setValue] = useState<LabelKeyValue[]>(defaultValue);
 
     const { labelsStore } = useStore();
+    const canManageLabels = isUserActionAllowed(UserActions.OnCallAdmin);
 
     const onChange = (value: LabelKeyValue[]) => {
       if (onDataUpdate) {
@@ -111,10 +113,10 @@ const _Labels = observer(
             value={value}
             onLoadKeys={onLoadKeys}
             onLoadValuesForKey={onLoadValuesForKey}
-            onCreateKey={labelsStore.createKey}
-            onUpdateKey={labelsStore.updateKey}
-            onCreateValue={labelsStore.createValue}
-            onUpdateValue={labelsStore.updateKeyValue}
+            onCreateKey={canManageLabels ? labelsStore.createKey : undefined}
+            onUpdateKey={canManageLabels ? labelsStore.updateKey : undefined}
+            onCreateValue={canManageLabels ? labelsStore.createValue : undefined}
+            onUpdateValue={canManageLabels ? labelsStore.updateKeyValue : undefined}
             onRowItemRemoval={(_pair, _index) => {}}
             onUpdateError={onUpdateError}
             errors={isValid() ? {} : { ...propsErrors }}

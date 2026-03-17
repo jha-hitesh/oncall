@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -1334,17 +1335,22 @@ def test_create_on_call_shift_override_in_past(on_call_shift_internal_api_setup,
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "role,expected_status",
+    "schedule_management_require_admin,role,expected_status",
     [
-        (LegacyAccessControlRole.ADMIN, status.HTTP_201_CREATED),
-        (LegacyAccessControlRole.EDITOR, status.HTTP_201_CREATED),
-        (LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
-        (LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.ADMIN, status.HTTP_201_CREATED),
+        (False, LegacyAccessControlRole.EDITOR, status.HTTP_201_CREATED),
+        (False, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.ADMIN, status.HTTP_201_CREATED),
+        (True, LegacyAccessControlRole.EDITOR, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
     ],
 )
 def test_on_call_shift_create_permissions(
     make_organization_and_user_with_plugin_token,
     make_user_auth_headers,
+    schedule_management_require_admin,
     role,
     expected_status,
 ):
@@ -1354,25 +1360,30 @@ def test_on_call_shift_create_permissions(
 
     url = reverse("api-internal:oncall_shifts-list")
 
-    with patch(
-        "apps.api.views.on_call_shifts.OnCallShiftView.create",
-        return_value=Response(
-            status=status.HTTP_201_CREATED,
-        ),
-    ):
-        response = client.post(url, format="json", **make_user_auth_headers(user, token))
+    with override_settings(SCHEDULE_MANAGEMENT_REQUIRE_ADMIN=schedule_management_require_admin):
+        with patch(
+            "apps.api.views.on_call_shifts.OnCallShiftView.create",
+            return_value=Response(
+                status=status.HTTP_201_CREATED,
+            ),
+        ):
+            response = client.post(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == expected_status
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "role,expected_status",
+    "schedule_management_require_admin,role,expected_status",
     [
-        (LegacyAccessControlRole.ADMIN, status.HTTP_200_OK),
-        (LegacyAccessControlRole.EDITOR, status.HTTP_200_OK),
-        (LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
-        (LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.ADMIN, status.HTTP_200_OK),
+        (False, LegacyAccessControlRole.EDITOR, status.HTTP_200_OK),
+        (False, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.ADMIN, status.HTTP_200_OK),
+        (True, LegacyAccessControlRole.EDITOR, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
     ],
 )
 def test_on_call_shift_update_permissions(
@@ -1380,6 +1391,7 @@ def test_on_call_shift_update_permissions(
     make_schedule,
     make_on_call_shift,
     make_user_auth_headers,
+    schedule_management_require_admin,
     role,
     expected_status,
 ):
@@ -1398,19 +1410,20 @@ def test_on_call_shift_update_permissions(
     )
     url = reverse("api-internal:oncall_shifts-detail", kwargs={"pk": on_call_shift.public_primary_key})
 
-    with patch(
-        "apps.api.views.on_call_shifts.OnCallShiftView.update",
-        return_value=Response(
-            status=status.HTTP_200_OK,
-        ),
-    ):
-        response = client.put(url, format="json", **make_user_auth_headers(user, token))
+    with override_settings(SCHEDULE_MANAGEMENT_REQUIRE_ADMIN=schedule_management_require_admin):
+        with patch(
+            "apps.api.views.on_call_shifts.OnCallShiftView.update",
+            return_value=Response(
+                status=status.HTTP_200_OK,
+            ),
+        ):
+            response = client.put(url, format="json", **make_user_auth_headers(user, token))
 
-        assert response.status_code == expected_status
+            assert response.status_code == expected_status
 
-        response = client.patch(url, format="json", **make_user_auth_headers(user, token))
+            response = client.patch(url, format="json", **make_user_auth_headers(user, token))
 
-        assert response.status_code == expected_status
+            assert response.status_code == expected_status
 
 
 @pytest.mark.django_db
@@ -1491,12 +1504,16 @@ def test_on_call_shift_retrieve_permissions(
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "role,expected_status",
+    "schedule_management_require_admin,role,expected_status",
     [
-        (LegacyAccessControlRole.ADMIN, status.HTTP_204_NO_CONTENT),
-        (LegacyAccessControlRole.EDITOR, status.HTTP_204_NO_CONTENT),
-        (LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
-        (LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.ADMIN, status.HTTP_204_NO_CONTENT),
+        (False, LegacyAccessControlRole.EDITOR, status.HTTP_204_NO_CONTENT),
+        (False, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.ADMIN, status.HTTP_204_NO_CONTENT),
+        (True, LegacyAccessControlRole.EDITOR, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
     ],
 )
 def test_on_call_shift_delete_permissions(
@@ -1504,6 +1521,7 @@ def test_on_call_shift_delete_permissions(
     make_schedule,
     make_on_call_shift,
     make_user_auth_headers,
+    schedule_management_require_admin,
     role,
     expected_status,
 ):
@@ -1522,13 +1540,14 @@ def test_on_call_shift_delete_permissions(
 
     url = reverse("api-internal:oncall_shifts-detail", kwargs={"pk": on_call_shift.public_primary_key})
 
-    with patch(
-        "apps.api.views.on_call_shifts.OnCallShiftView.destroy",
-        return_value=Response(
-            status=status.HTTP_204_NO_CONTENT,
-        ),
-    ):
-        response = client.delete(url, format="json", **make_user_auth_headers(user, token))
+    with override_settings(SCHEDULE_MANAGEMENT_REQUIRE_ADMIN=schedule_management_require_admin):
+        with patch(
+            "apps.api.views.on_call_shifts.OnCallShiftView.destroy",
+            return_value=Response(
+                status=status.HTTP_204_NO_CONTENT,
+            ),
+        ):
+            response = client.delete(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == expected_status
 

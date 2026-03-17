@@ -189,12 +189,25 @@ The Grafana OnCall Slack app includes helpful message shortcuts and slash comman
 Use `/escalate` to page a team (and additional responders) directly from Slack.
 
 1. Type `/escalate` in the message box of any Slack channel then click **Send**.
-1. Fill out the **Create Alert Group** form then click **Submit**.
+1. Fill out the **Create Alert Group** form. Depending on the selected team, this can include a short message, a detailed description, importance selection, and dynamic label values.
+1. Click **Submit**.
 1. Once the Grafana OnCall app sends a Slack message with the newly created alert, the alert group is open and firing.
 
 It's also possible to page additional responders for an existing alert group. To do so, use the "Responders" button
 in the alert group message.
 To manually page people, refer to [Page people manually](ref:page-people-manually).
+
+If the selected direct paging integration applies static labels, those labels are attached automatically.
+If it defines dynamic label keys, Slack will prompt you to choose the value for each key before the alert group is created.
+
+### Custom Slack channels for alert groups
+
+Some integrations can be configured to create a dedicated Slack channel for each alert group.
+When enabled, Grafana OnCall evaluates integration templates to decide whether a channel should be created and what
+channel payload to send to Slack.
+
+This is useful when you want incidents of a particular class to get their own channel instead of being posted to a shared one.
+If channel creation is enabled and succeeds, the alert group timeline records the created Slack channel.
 
 ### Slack `/oncall` command
 
@@ -208,12 +221,12 @@ Use the `/oncall` Slack command to create a new alert group directly from Slack 
 
 ### Message shortcuts
 
-Use message shortcuts to add resolution notes directly from Slack. Message shortcuts are available in the More actions menu from any message.
+Use message shortcuts to add and remove resolution notes directly from Slack. Message shortcuts are available in the More actions menu from any message.
 
 > **Note:** In order to associate the resolution note to an alert group, this message shortcut can only be applied to messages in the thread of an alert group.
 
-1. From an alert group thread, navigate to the Slack message that you wish to add as a resolution note.
+1. From an alert group thread, navigate to the Slack message that you want to add to or remove from the resolution note.
 1. Hover over the message and select **More actions** from the menu options.
-1. Select **Add as resolution note**.
-1. The Grafana OnCall app will react to the message in Slack with the memo emoji and add the message to the alert group timeline.
+1. Select **Add as resolution note** or **Remove from resolution note**.
+1. The Grafana OnCall app will add or remove the memo emoji reaction and update the alert group timeline.
 {{< /collapse >}}

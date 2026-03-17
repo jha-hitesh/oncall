@@ -251,7 +251,36 @@ def test_google_start_auth_redirect_ok(
         "https://accounts.google.com/o/oauth2/auth?client_id=ouath2_key"
         f"&redirect_uri={redirect_uri}&response_type=code"
         "&state=token_string&scope=https://www.googleapis.com/auth/calendar.events.readonly+openid+email+profile"
-        "&access_type=offline&approval_prompt=auto"
+        "&access_type=offline&prompt=consent"
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.social_auth.backends.OrganizationGoogleOAuth2.get_redirect_uri")
+@patch("apps.social_auth.backends.GoogleOAuth2Token.create_auth_token", return_value=("something", "token_string"))
+@override_settings(SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_SCOPE=["https://www.googleapis.com/auth/calendar.events"])
+@override_settings(SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_KEY="ouath2_key")
+def test_organization_google_start_auth_redirect_ok(
+    _mock_create_google_oauth2_auth_token,
+    mock_google_oauth2_backend_get_redirect_uri,
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+):
+    redirect_uri = "http://testserver"
+    mock_google_oauth2_backend_get_redirect_uri.return_value = redirect_uri
+
+    _, user, token = make_organization_and_user_with_plugin_token()
+
+    client = APIClient()
+    url = reverse("api-internal:social-auth", kwargs={"backend": "google-oauth2-org"})
+    response = client.get(url, **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == (
+        "https://accounts.google.com/o/oauth2/auth?client_id=ouath2_key"
+        f"&redirect_uri={redirect_uri}&response_type=code"
+        "&state=token_string&scope=https://www.googleapis.com/auth/calendar.events+openid+email+profile"
+        "&access_type=offline&prompt=consent"
     )
 
 
@@ -277,6 +306,30 @@ def test_google_complete_auth_redirect_ok(
 
     assert response.status_code == status.HTTP_302_FOUND
     assert response.url == f"{GRAFANA_URL}/a/{PluginID.ONCALL}/users/me"
+
+
+@pytest.mark.django_db
+@patch("apps.api.views.auth.do_complete", return_value=None)
+def test_organization_google_complete_auth_redirect_ok(
+    _mock_do_complete,
+    make_organization,
+    make_user_for_organization,
+    make_google_oauth2_token_for_user,
+):
+    organization = make_organization(grafana_url=GRAFANA_URL)
+    admin = make_user_for_organization(organization)
+    _, google_oauth2_token = make_google_oauth2_token_for_user(admin)
+
+    client = APIClient()
+    url = (
+        reverse("api-internal:complete-social-auth", kwargs={"backend": "google-oauth2-org"})
+        + f"?state={google_oauth2_token}"
+    )
+
+    response = client.get(url)
+
+    assert response.status_code == status.HTTP_302_FOUND
+    assert response.url == f"{GRAFANA_URL}/a/{PluginID.ONCALL}/settings?tab=GoogleCalendar"
 
 
 @pytest.mark.django_db

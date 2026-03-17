@@ -142,6 +142,12 @@ Grafana OnCall provides pre-configured default Jinja templates for supported int
 For any monitoring system not available in the Grafana OnCall integrations list, configure a [Webhook integration](ref:webhook-integration) and configure your
 templates as needed.
 
+Integration-specific templates can also power feature-specific behavior. Examples include:
+
+- Slack custom channel creation templates such as whether to create a channel and the JSON payload used to create it
+- Google Calendar event title and description templates used by the `Create calendar invite` escalation step
+- Outgoing webhook request and response rendering templates
+
 ## Edit templates
 
 1. Open the **Integration** page for the desired integration.

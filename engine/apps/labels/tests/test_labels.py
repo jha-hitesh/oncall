@@ -1,9 +1,11 @@
 import pytest
+from django.conf import settings as django_settings
 
 from apps.alerts.models import AlertReceiveChannel
 from apps.labels.models import (
     AlertReceiveChannelAssociatedLabel,
     AssociatedLabel,
+    LabelKeyCache,
     LabelValueCache,
     WebhookAssociatedLabel,
 )
@@ -139,3 +141,69 @@ def test_get_associating_label_model():
     wrong_model_name = "SomeModel"
     with pytest.raises(LookupError):
         get_associating_label_model(wrong_model_name)
+
+
+@pytest.mark.django_db
+def test_delete_key_cascades_values_and_associations(make_label_key_and_value, make_organization, make_alert_receive_channel):
+    organization = make_organization()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    key, value = make_label_key_and_value(organization)
+
+    AlertReceiveChannelAssociatedLabel.objects.create(
+        alert_receive_channel=alert_receive_channel,
+        organization=organization,
+        key=key,
+        value=value,
+    )
+
+    key_id = key.id
+    value_id = value.id
+
+    key.delete()
+
+    assert not LabelKeyCache.objects.filter(id=key_id).exists()
+    assert not LabelValueCache.objects.filter(id=value_id).exists()
+    assert not AlertReceiveChannelAssociatedLabel.objects.filter(key_id=key_id, value_id=value_id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_value_cascades_associations_but_keeps_key(make_label_key_and_value, make_organization, make_alert_receive_channel):
+    organization = make_organization()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    key, value = make_label_key_and_value(organization)
+
+    AlertReceiveChannelAssociatedLabel.objects.create(
+        alert_receive_channel=alert_receive_channel,
+        organization=organization,
+        key=key,
+        value=value,
+    )
+
+    key_id = key.id
+    value_id = value.id
+
+    value.delete()
+
+    assert LabelKeyCache.objects.filter(id=key_id).exists()
+    assert not LabelValueCache.objects.filter(id=value_id).exists()
+    assert not AlertReceiveChannelAssociatedLabel.objects.filter(key_id=key_id, value_id=value_id).exists()
+
+
+@pytest.mark.django_db
+def test_label_colors_default_and_association_payload(make_organization, make_alert_receive_channel):
+    organization = make_organization()
+    alert_receive_channel = make_alert_receive_channel(organization)
+
+    labels_data = [
+        {
+            "key": {"id": "key-1", "name": "service", "prescribed": False},
+            "value": {"id": "value-1", "name": "payments", "prescribed": False},
+        }
+    ]
+
+    AssociatedLabel.update_association(labels_data, alert_receive_channel, organization)
+
+    key = LabelKeyCache.objects.get(id="key-1")
+    value = LabelValueCache.objects.get(id="value-1")
+    assert key.color_code == django_settings.FEATURE_LABELS_KEY_DEFAULT_COLOR
+    assert value.color_code == django_settings.FEATURE_LABELS_VALUE_DEFAULT_COLOR

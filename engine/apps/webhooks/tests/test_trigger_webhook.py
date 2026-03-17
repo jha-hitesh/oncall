@@ -555,6 +555,147 @@ def test_execute_webhook_ok_forward_all_resolved(
 
 
 @pytest.mark.django_db
+def test_execute_webhook_adds_response_to_timeline(
+    make_organization,
+    make_user_for_organization,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_custom_webhook,
+):
+    organization = make_organization()
+    user = make_user_for_organization(organization)
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    webhook = make_custom_webhook(
+        organization=organization,
+        url="https://something.cool/",
+        http_method="POST",
+        trigger_type=Webhook.TRIGGER_RESOLVE,
+        forward_all=False,
+        add_response_to_timeline=True,
+    )
+
+    mock_response = MockResponse(content={"status": "ok", "external_id": "abc123"})
+    with patch("apps.webhooks.utils.socket.gethostbyname", return_value="8.8.8.8"):
+        with patch("apps.webhooks.models.webhook.WebhookSession.request", return_value=mock_response):
+            execute_webhook(webhook.pk, alert_group.pk, user.pk, None)
+
+    log_record = alert_group.log_records.last()
+    assert log_record.type == AlertGroupLogRecord.TYPE_CUSTOM_WEBHOOK_TRIGGERED
+    assert log_record.step_specific_info == {
+        "webhook_name": webhook.name,
+        "webhook_id": webhook.public_primary_key,
+        "response_log": True,
+    }
+    assert log_record.reason == json.dumps(mock_response.json())
+    assert log_record.rendered_log_line_action() == f"outgoing webhook `{webhook.name}` response: {log_record.reason}"
+
+
+@pytest.mark.django_db
+def test_execute_webhook_sends_signals_for_trigger_and_response_logs(
+    make_organization,
+    make_user_for_organization,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_custom_webhook,
+):
+    organization = make_organization()
+    user = make_user_for_organization(organization)
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    webhook = make_custom_webhook(
+        organization=organization,
+        url="https://something.cool/",
+        http_method="POST",
+        trigger_type=Webhook.TRIGGER_RESOLVE,
+        forward_all=False,
+        add_response_to_timeline=True,
+    )
+
+    mock_response = MockResponse(content={"status": "ok"})
+    with patch("apps.webhooks.utils.socket.gethostbyname", return_value="8.8.8.8"):
+        with patch("apps.webhooks.models.webhook.WebhookSession.request", return_value=mock_response):
+            with patch(
+                "apps.alerts.tasks.send_alert_group_signal.send_alert_group_signal.delay"
+            ) as mock_send_alert_group_signal:
+                execute_webhook(webhook.pk, alert_group.pk, user.pk, None)
+
+    created_log_ids = list(alert_group.log_records.order_by("pk").values_list("pk", flat=True))
+    assert mock_send_alert_group_signal.call_args_list == [call(created_log_ids[0]), call(created_log_ids[1])]
+
+
+@pytest.mark.django_db
+def test_execute_webhook_adds_rendered_response_to_timeline(
+    make_organization,
+    make_user_for_organization,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_custom_webhook,
+):
+    organization = make_organization()
+    user = make_user_for_organization(organization)
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    webhook = make_custom_webhook(
+        organization=organization,
+        url="https://something.cool/",
+        http_method="POST",
+        trigger_type=Webhook.TRIGGER_RESOLVE,
+        forward_all=False,
+        add_response_to_timeline=True,
+        response_template="status={{ webhook_response.status }}, event_type={{ event.type }}",
+    )
+
+    mock_response = MockResponse(content={"status": "ok", "external_id": "abc123"})
+    with patch("apps.webhooks.utils.socket.gethostbyname", return_value="8.8.8.8"):
+        with patch("apps.webhooks.models.webhook.WebhookSession.request", return_value=mock_response):
+            execute_webhook(webhook.pk, alert_group.pk, user.pk, None)
+
+    log_record = alert_group.log_records.last()
+    assert log_record.reason == "status=ok, event_type=resolve"
+    assert log_record.rendered_log_line_action() == f"outgoing webhook `{webhook.name}` response: {log_record.reason}"
+
+
+@pytest.mark.django_db
+def test_execute_webhook_adds_text_response_to_timeline_template(
+    make_organization,
+    make_user_for_organization,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_custom_webhook,
+):
+    organization = make_organization()
+    user = make_user_for_organization(organization)
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    webhook = make_custom_webhook(
+        organization=organization,
+        url="https://something.cool/",
+        http_method="POST",
+        trigger_type=Webhook.TRIGGER_RESOLVE,
+        forward_all=False,
+        add_response_to_timeline=True,
+        response_template="Webhook Response: {{ webhook_response }} / {{ event.type }}",
+    )
+
+    class TextResponse:
+        status_code = 200
+        content = b"plain text response"
+
+        def json(self):
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    mock_response = TextResponse()
+    with patch("apps.webhooks.utils.socket.gethostbyname", return_value="8.8.8.8"):
+        with patch("apps.webhooks.models.webhook.WebhookSession.request", return_value=mock_response):
+            execute_webhook(webhook.pk, alert_group.pk, user.pk, None)
+
+    log_record = alert_group.log_records.last()
+    assert log_record.reason == "Webhook Response: plain text response / resolve"
+    assert log_record.rendered_log_line_action() == f"outgoing webhook `{webhook.name}` response: {log_record.reason}"
+
+
+@pytest.mark.django_db
 def test_execute_webhook_using_responses_data(
     make_organization,
     make_user_for_organization,

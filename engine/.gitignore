@@ -2,5 +2,7 @@ requirements-enterprise*.txt
 extensions/
 uwsgi-local.ini
 celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
 *.db
 gcp_service_account.json

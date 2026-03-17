@@ -26,8 +26,10 @@ export interface TimeLineItem {
   action: string;
   author: ApiSchemas['User'] | null;
   escalation_chain: TimelineLink | null;
+  google_calendar_event_link: TimelineExternalLink | null;
   incident: DeclaredIncident | null;
   schedule: TimelineLink | null;
+  slack_channel: TimelineExternalLink | null;
   webhook: TimelineLink | null;
   created_at: string;
   realm: TimeLineRealm;
@@ -68,4 +70,9 @@ interface DeclaredIncident {
 interface TimelineLink {
   pk: string;
   title: string;
+}
+
+interface TimelineExternalLink {
+  title: string;
+  url: string | null;
 }

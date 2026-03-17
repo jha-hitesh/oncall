@@ -402,15 +402,6 @@ def get_user_permission_role_mapping_from_frontend_plugin_json() -> RoleMapping:
     with open("../grafana-plugin/src/plugin.json") as fp:
         plugin_json: PluginJSON = json.load(fp)
 
-    # NOTE: we need to manually add grafana-labels-app permissions here since these
-    # are granted to basic roles via the grafana-labels-app itself, and not
-    # ../grafana-plugin/src/plugin.json
-    #
-    # However, we do sync these permissions into our backend. See
-    # https://github.com/grafana/irm/pull/200 for more details
-    #
-    # We don't currently add the label delete permission here because we don't currently
-    # use this in OnCall
     role_mapping: RoleMapping = {
         LegacyAccessControlRole.NONE: [],
         LegacyAccessControlRole.VIEWER: [

@@ -5,12 +5,33 @@ import { AppFeature } from 'state/features';
 import { TemplateForEdit, commonTemplateForEdit } from './CommonAlertTemplatesForm.config';
 
 export const getTemplatesForEdit = (features: Record<string, boolean>) => {
-  const templatesForEdit = {...commonTemplateForEdit}
+  const templatesForEdit = { ...commonTemplateForEdit };
+
+  if (!features?.[AppFeature.Telegram]) {
+    delete templatesForEdit.telegram_title_template;
+    delete templatesForEdit.telegram_message_template;
+    delete templatesForEdit.telegram_image_url_template;
+  }
+
+  if (!features?.[AppFeature.CloudConnection]) {
+    delete templatesForEdit.mobile_app_title_template;
+    delete templatesForEdit.mobile_app_message_template;
+  }
+
+  if (!features?.[AppFeature.SlackChannelCreation]) {
+    delete templatesForEdit.slack_create_custom_channel_template;
+    delete templatesForEdit.slack_channel_payload_template;
+  }
+  if (!features?.[AppFeature.GoogleOauth2]) {
+    delete templatesForEdit.google_calendar_title_template;
+    delete templatesForEdit.google_calendar_description_template;
+  }
+
   if (features?.[AppFeature.MsTeams]) {
-    merge(templatesForEdit, msteamsTemplateForEdit)
+    merge(templatesForEdit, msteamsTemplateForEdit);
   }
   if (features?.[AppFeature.Mattermost]) {
-    merge(templatesForEdit, mattermostTemplateForEdit)
+    merge(templatesForEdit, mattermostTemplateForEdit);
   }
   return templatesForEdit;
 };

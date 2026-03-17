@@ -10,7 +10,7 @@ from apps.google.client import (
     GoogleCalendarRefreshError,
     GoogleCalendarUnauthorizedHTTPError,
 )
-from apps.google.models import GoogleOAuth2User
+from apps.google.models import GoogleOAuth2Organization, GoogleOAuth2User
 from apps.schedules.models import OnCallSchedule, ShiftSwapRequest
 from common.custom_celery_tasks import shared_dedicated_queue_retry_task
 
@@ -141,3 +141,49 @@ def sync_out_of_office_calendar_events_for_all_users() -> None:
 
     for google_oauth2_user in tokens_containing_required_scopes:
         sync_out_of_office_calendar_events_for_user.apply_async(args=(google_oauth2_user.pk,))
+
+
+@shared_dedicated_queue_retry_task(autoretry_for=(Exception,), retry_backoff=True)
+def check_google_calendar_connection_for_organization(google_oauth2_organization_pk: int) -> None:
+    google_oauth2_organization = GoogleOAuth2Organization.objects.select_related("organization").get(
+        pk=google_oauth2_organization_pk
+    )
+    organization = google_oauth2_organization.organization
+    google_api_client = GoogleCalendarAPIClient(
+        google_oauth2_organization.access_token, google_oauth2_organization.refresh_token
+    )
+
+    logger.info(f"Checking Google Calendar connection for organization {organization.pk}")
+
+    try:
+        google_api_client.check_primary_calendar_access()
+    except GoogleCalendarUnauthorizedHTTPError:
+        logger.warning(
+            f"Google Calendar connection for organization {organization.pk} is missing required scopes. "
+            "Safe to keep connected until an admin reconnects"
+        )
+        return
+    except GoogleCalendarRefreshError:
+        logger.exception(
+            f"Google Calendar connection for organization {organization.pk} has an invalid access and/or refresh token"
+        )
+        organization.reset_google_oauth2_organization_settings()
+        return
+    except GoogleCalendarGenericHTTPError:
+        logger.exception(
+            f"Failed to verify Google Calendar connection for organization {organization.pk} due to a generic HTTP error"
+        )
+        return
+
+
+@shared_dedicated_queue_retry_task(autoretry_for=(Exception,), retry_backoff=True)
+def check_google_calendar_connections_for_all_organizations() -> None:
+    google_oauth2_organizations = GoogleOAuth2Organization.objects.filter(organization__deleted_at__isnull=True)
+
+    logger.info(
+        f"Connected organization Google Calendar tokens - "
+        f"{google_oauth2_organizations.count()}/{GoogleOAuth2Organization.objects.count()}"
+    )
+
+    for google_oauth2_organization in google_oauth2_organizations:
+        check_google_calendar_connection_for_organization.apply_async(args=(google_oauth2_organization.pk,))

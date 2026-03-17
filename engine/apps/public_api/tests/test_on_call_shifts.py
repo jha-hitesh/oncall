@@ -1,11 +1,14 @@
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.response import Response
 from rest_framework.test import APIClient
 
+from apps.api.permissions import LegacyAccessControlRole
 from apps.schedules.models import CustomOnCallShift, OnCallScheduleCalendar, OnCallScheduleWeb
 
 invalid_field_data_1 = {
@@ -429,6 +432,45 @@ def test_create_override_on_call_shift(make_organization_and_user_with_token):
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data == result
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "schedule_management_require_admin,role,expected_status",
+    [
+        (False, LegacyAccessControlRole.ADMIN, status.HTTP_201_CREATED),
+        (False, LegacyAccessControlRole.EDITOR, status.HTTP_201_CREATED),
+        (False, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (False, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.ADMIN, status.HTTP_201_CREATED),
+        (True, LegacyAccessControlRole.EDITOR, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.VIEWER, status.HTTP_403_FORBIDDEN),
+        (True, LegacyAccessControlRole.NONE, status.HTTP_403_FORBIDDEN),
+    ],
+)
+def test_create_override_on_call_shift_permissions(
+    make_organization_and_user,
+    make_public_api_token,
+    schedule_management_require_admin,
+    role,
+    expected_status,
+):
+    organization, user = make_organization_and_user(role)
+    organization.is_rbac_permissions_enabled = False
+    organization.save(update_fields=["is_rbac_permissions_enabled"])
+    _, token = make_public_api_token(user, organization)
+
+    client = APIClient()
+    url = reverse("api-public:on_call_shifts-list")
+
+    with override_settings(SCHEDULE_MANAGEMENT_REQUIRE_ADMIN=schedule_management_require_admin):
+        with patch(
+            "apps.public_api.views.on_call_shifts.CustomOnCallShiftView.create",
+            return_value=Response(status=status.HTTP_201_CREATED),
+        ):
+            response = client.post(url, format="json", HTTP_AUTHORIZATION=f"{token}")
+
+    assert response.status_code == expected_status
 
 
 @pytest.mark.django_db

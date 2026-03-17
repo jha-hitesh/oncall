@@ -21,6 +21,10 @@ export interface AlertTemplatesDTO {
   telegram_message_template_is_default: boolean;
   slack_image_url_template: string;
   slack_image_url_template_is_default: boolean;
+  google_calendar_title_template: string;
+  google_calendar_title_template_is_default: boolean;
+  google_calendar_description_template: string;
+  google_calendar_description_template_is_default: boolean;
   web_image_url_template: string;
   web_image_url_template_is_default: boolean;
   telegram_image_url_template: string;

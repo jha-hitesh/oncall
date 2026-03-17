@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone
 
 from apps.base.models import UserNotificationPolicy, UserNotificationPolicyLogRecord
@@ -83,6 +84,7 @@ def test_slack_message_permalink_token_revoked(mock_slack_api_call, slack_messag
     mock_slack_api_call.assert_not_called()
 
 
+@override_settings(FEATURE_SLACK_ADD_USER_BEFORE_TAGGING=False)
 @pytest.mark.django_db
 def test_send_slack_notification(
     make_organization_and_user_with_slack_identities,
@@ -114,6 +116,167 @@ def test_send_slack_notification(
 
     log_record = notification_policy.personal_log_records.last()
     assert log_record.type == UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_SUCCESS
+
+
+@override_settings(FEATURE_SLACK_ADD_USER_BEFORE_TAGGING=False)
+@pytest.mark.django_db
+def test_send_slack_notification_dedicated_channel_posts_to_channel(
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_user_notification_policy,
+    make_slack_channel,
+    make_slack_message,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+
+    notification_policy = make_user_notification_policy(
+        user,
+        UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.SLACK,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+
+    with patch("apps.slack.client.SlackClient.conversations_members") as mock_members, patch(
+        "apps.slack.client.SlackClient.chat_postMessage"
+    ) as mock_post:
+        mock_members.return_value = {"members": [slack_user_identity.slack_id]}
+        mock_post.return_value = build_slack_response({"ok": True, "ts": "123.456"})
+
+        slack_message.send_slack_notification(user, alert_group, notification_policy)
+
+    _, kwargs = mock_post.call_args
+    assert kwargs["channel"] == slack_channel.slack_id
+    assert "thread_ts" not in kwargs
+
+
+@override_settings(FEATURE_SLACK_ADD_USER_BEFORE_TAGGING=True)
+@pytest.mark.django_db
+def test_send_slack_notification_invites_user_before_mentioning(
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_user_notification_policy,
+    make_slack_channel,
+    make_slack_message,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+
+    notification_policy = make_user_notification_policy(
+        user,
+        UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.SLACK,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+
+    with patch("apps.slack.client.SlackClient.conversations_members") as mock_members, patch(
+        "apps.slack.client.SlackClient.conversations_invite"
+    ) as mock_invite, patch("apps.slack.client.SlackClient.chat_postMessage") as mock_post:
+        mock_members.return_value = {"members": []}
+        mock_post.return_value = build_slack_response({"ok": True, "ts": "123.456"})
+
+        slack_message.send_slack_notification(user, alert_group, notification_policy)
+
+    mock_invite.assert_called_once_with(channel=slack_channel.slack_id, users=slack_user_identity.slack_id)
+    mock_post.assert_called_once()
+
+    log_record = notification_policy.personal_log_records.last()
+    assert log_record.type == UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_SUCCESS
+
+
+@override_settings(FEATURE_SLACK_ADD_USER_BEFORE_TAGGING=True)
+@pytest.mark.django_db
+def test_send_slack_notification_posts_even_when_user_cannot_be_invited(
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_user_notification_policy,
+    make_slack_channel,
+    make_slack_message,
+):
+    organization, user, _, _ = make_organization_and_user_with_slack_identities()
+
+    notification_policy = make_user_notification_policy(
+        user,
+        UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.SLACK,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(alert_group.channel.organization.slack_team_identity)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+
+    with patch("apps.slack.client.SlackClient.conversations_members") as mock_members, patch(
+        "apps.slack.client.SlackClient.conversations_invite",
+        side_effect=SlackAPIError(response=build_slack_response({"ok": False, "error": "cant_invite"})),
+    ) as mock_invite, patch("apps.slack.client.SlackClient.chat_postMessage") as mock_post:
+        mock_members.return_value = {"members": []}
+        mock_post.return_value = build_slack_response({"ok": True, "ts": "123.456"})
+
+        slack_message.send_slack_notification(user, alert_group, notification_policy)
+
+    mock_invite.assert_called_once()
+    mock_post.assert_called_once()
+
+    log_records = notification_policy.personal_log_records.order_by("created_at")
+    assert log_records.count() == 2
+    assert (
+        log_records.first().notification_error_code
+        == UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_IN_SLACK_USER_NOT_IN_CHANNEL
+    )
+    assert log_records.last().type == UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_SUCCESS
+
+
+@override_settings(FEATURE_SLACK_ADD_USER_BEFORE_TAGGING=False)
+@pytest.mark.django_db
+def test_send_slack_notification_does_not_invite_user_when_feature_flag_is_disabled(
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_user_notification_policy,
+    make_slack_channel,
+    make_slack_message,
+):
+    organization, user, slack_team_identity, _ = make_organization_and_user_with_slack_identities()
+
+    notification_policy = make_user_notification_policy(
+        user,
+        UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.SLACK,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+
+    with patch("apps.slack.client.SlackClient.conversations_members") as mock_members, patch(
+        "apps.slack.client.SlackClient.conversations_invite"
+    ) as mock_invite, patch("apps.slack.client.SlackClient.chat_postMessage") as mock_post:
+        mock_post.return_value = build_slack_response({"ok": True, "ts": "123.456"})
+
+        slack_message.send_slack_notification(user, alert_group, notification_policy)
+
+    mock_members.assert_not_called()
+    mock_invite.assert_not_called()
+    mock_post.assert_called_once()
 
 
 @pytest.mark.django_db

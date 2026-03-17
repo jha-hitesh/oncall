@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 from django.db.models import Max
+from django.test import override_settings
 from django.urls import reverse
 from django.utils.timezone import timedelta
 from rest_framework import status
@@ -10,6 +11,7 @@ from rest_framework.test import APIClient
 
 from apps.alerts.models import EscalationPolicy
 from apps.api.permissions import LegacyAccessControlRole
+from apps.labels.models import DEFAULT_LABEL_COLOR_CODE
 from common.incident_api.client import DEFAULT_INCIDENT_SEVERITY, IncidentAPIException
 
 
@@ -843,6 +845,7 @@ def test_escalation_policy_switch_importance(
         "notify_to_group": None,
         "notify_to_team_members": None,
         "severity": None,
+        "invitees": None,
         "important": True,
         "wait_delay": None,
     }
@@ -876,8 +879,50 @@ def test_escalation_policy_escalation_options_webhooks(
 
 
 @pytest.mark.django_db
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+def test_create_escalation_policy_calendar_invite(
+    escalation_policy_internal_api_setup,
+    make_user_auth_headers,
+):
+    token, escalation_chain, _, user, _ = escalation_policy_internal_api_setup
+    client = APIClient()
+    url = reverse("api-internal:escalation_policy-list")
+
+    response = client.post(
+        url,
+        {
+            "step": EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+            "escalation_chain": escalation_chain.public_primary_key,
+            "invitees": EscalationPolicy.INVITEES_CURRENT_TEAM_MEMBERS,
+        },
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.json()["invitees"] == EscalationPolicy.INVITEES_CURRENT_TEAM_MEMBERS
+
+
+@pytest.mark.django_db
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+def test_escalation_policy_escalation_options_include_calendar_invite(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+):
+    _, user, token = make_organization_and_user_with_plugin_token()
+    client = APIClient()
+
+    url = reverse("api-internal:escalation_policy-escalation-options")
+    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+
+    returned_options = [option["value"] for option in response.json()]
+    assert EscalationPolicy.STEP_CREATE_CALENDAR_INVITE in returned_options
+
+
+@pytest.mark.django_db
 def test_escalation_policy_severity_options(
     make_organization_and_user_with_plugin_token,
+    make_label_key,
     make_user_auth_headers,
 ):
     organization, user, token = make_organization_and_user_with_plugin_token()
@@ -910,6 +955,7 @@ def test_escalation_policy_severity_options(
     # labels enabled
     organization.is_grafana_labels_enabled = True
     organization.save()
+    make_label_key(organization, key_name="severity", color_code="#abcdef")
 
     with patch("common.incident_api.client.IncidentAPIClient.get_severities") as mock_get_severities:
         mock_get_severities.return_value = available_severities, None
@@ -919,6 +965,7 @@ def test_escalation_policy_severity_options(
         {
             "value": EscalationPolicy.SEVERITY_SET_FROM_LABEL,
             "display_name": EscalationPolicy.SEVERITY_SET_FROM_LABEL_DISPLAY_VALUE,
+            "color_code": "#abcdef",
         }
     ] + expected_options
     assert response.json() == expected_options

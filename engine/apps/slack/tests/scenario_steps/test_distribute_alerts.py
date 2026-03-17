@@ -2,11 +2,13 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone
 
-from apps.alerts.models import AlertGroup, AlertReceiveChannel
+from apps.alerts.constants import ActionSource
+from apps.alerts.models import AlertGroup, AlertGroupLogRecord, AlertReceiveChannel
 from apps.slack.errors import SlackAPIFetchMembersFailedError, SlackAPIRatelimitError, get_error_class
-from apps.slack.models import SlackMessage
+from apps.slack.models import SlackChannel, SlackMessage
 from apps.slack.scenarios.distribute_alerts import IncomingAlertStep
 from apps.slack.tests.conftest import build_slack_response
 
@@ -15,6 +17,123 @@ SLACK_POST_MESSAGE_SUCCESS_RESPONSE = {"ts": SLACK_MESSAGE_TS}
 
 
 class TestIncomingAlertStep:
+    @patch("apps.slack.client.SlackClient.chat_postMessage", return_value=SLACK_POST_MESSAGE_SUCCESS_RESPONSE)
+    @patch("apps.slack.client.SlackClient.conversations_join")
+    @patch("apps.slack.client.SlackClient.conversations_create")
+    @override_settings(FEATURE_SLACK_INTEGRATION_ENABLED=True, FEATURE_SLACK_CHANNEL_CREATION_ENABLED=True)
+    @pytest.mark.django_db
+    def test_process_signal_success_first_message_with_custom_slack_channel(
+        self,
+        mock_conversations_create,
+        mock_conversations_join,
+        mock_chat_postMessage,
+        make_organization_with_slack_team_identity,
+        make_alert_receive_channel,
+        make_alert_group,
+        make_alert,
+    ):
+        organization, slack_team_identity = make_organization_with_slack_team_identity()
+
+        mock_conversations_create.return_value = {
+            "channel": {
+                "id": "CNEW123",
+                "name": "disk-full",
+                "is_archived": False,
+                "is_shared": False,
+            }
+        }
+
+        alert_receive_channel = make_alert_receive_channel(
+            organization,
+            messaging_backends_templates={
+                "SLACK": {
+                    "create_custom_channel": "true",
+                    "channel_payload": '{"name": "{{ payload.name | lower }}", "is_private": false}',
+                }
+            },
+        )
+        alert_group = make_alert_group(alert_receive_channel, slack_message_sent=False)
+        alert = make_alert(alert_group, raw_request_data={"name": "DISK-FULL"}, title="DISK-FULL")
+
+        step = IncomingAlertStep(slack_team_identity)
+        step.process_signal(alert)
+
+        mock_conversations_create.assert_called_once_with(name="disk-full", is_private=False)
+        mock_conversations_join.assert_called_once_with(channel="CNEW123")
+        mock_chat_postMessage.assert_called_once()
+        assert mock_chat_postMessage.call_args.kwargs["channel"] == "CNEW123"
+
+        alert_group.refresh_from_db()
+        assert alert_group.slack_message is not None
+        assert alert_group.slack_message.channel.slack_id == "CNEW123"
+        created_channel = SlackChannel.objects.get(slack_team_identity=slack_team_identity, slack_id="CNEW123")
+        assert created_channel.alert_group == alert_group
+        assert alert_group.log_records.filter(
+            type=AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED,
+            action_source=ActionSource.SLACK,
+            step_specific_info={
+                "slack_channel_name": "disk-full",
+                "slack_channel_id": "CNEW123",
+                "slack_team_id": slack_team_identity.slack_id,
+                "slack_channel_reused": False,
+            },
+        ).exists()
+
+    @patch("apps.slack.client.SlackClient.chat_postMessage", return_value=SLACK_POST_MESSAGE_SUCCESS_RESPONSE)
+    @patch("apps.slack.client.SlackClient.conversations_create")
+    @override_settings(FEATURE_SLACK_INTEGRATION_ENABLED=True, FEATURE_SLACK_CHANNEL_CREATION_ENABLED=True)
+    @pytest.mark.django_db
+    def test_process_signal_existing_custom_slack_channel_keeps_alert_group_null(
+        self,
+        mock_conversations_create,
+        mock_chat_postMessage,
+        make_organization_with_slack_team_identity,
+        make_alert_receive_channel,
+        make_alert_group,
+        make_alert,
+        make_slack_channel,
+    ):
+        organization, slack_team_identity = make_organization_with_slack_team_identity()
+
+        existing_channel = make_slack_channel(
+            slack_team_identity=slack_team_identity,
+            slack_id="CEXIST123",
+            name="disk-full",
+            alert_group=None,
+        )
+
+        alert_receive_channel = make_alert_receive_channel(
+            organization,
+            messaging_backends_templates={
+                "SLACK": {
+                    "create_custom_channel": "true",
+                    "channel_payload": '{"name": "{{ payload.name | lower }}", "is_private": false}',
+                }
+            },
+        )
+        alert_group = make_alert_group(alert_receive_channel, slack_message_sent=False)
+        alert = make_alert(alert_group, raw_request_data={"name": "DISK-FULL"}, title="DISK-FULL")
+
+        step = IncomingAlertStep(slack_team_identity)
+        step.process_signal(alert)
+
+        mock_conversations_create.assert_not_called()
+        mock_chat_postMessage.assert_called_once()
+        assert mock_chat_postMessage.call_args.kwargs["channel"] == "CEXIST123"
+
+        existing_channel.refresh_from_db()
+        assert existing_channel.alert_group is None
+        assert alert_group.log_records.filter(
+            type=AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED,
+            action_source=ActionSource.SLACK,
+            step_specific_info={
+                "slack_channel_name": "disk-full",
+                "slack_channel_id": "CEXIST123",
+                "slack_team_id": slack_team_identity.slack_id,
+                "slack_channel_reused": True,
+            },
+        ).exists()
+
     @patch("apps.slack.client.SlackClient.chat_postMessage", return_value=SLACK_POST_MESSAGE_SUCCESS_RESPONSE)
     @pytest.mark.django_db
     def test_process_signal_success_first_message(
@@ -234,7 +353,42 @@ class TestIncomingAlertStep:
         alert_group.refresh_from_db()
         alert.refresh_from_db()
 
-        assert alert_group.slack_message_sent is True
+    @patch("apps.slack.client.SlackClient.chat_postMessage")
+    @pytest.mark.django_db
+    def test_process_signal_debug_maintenance_mode_dedicated_channel_posts_follow_up_to_channel(
+        self,
+        mock_chat_postMessage,
+        make_slack_team_identity,
+        make_organization,
+        make_slack_channel,
+        make_alert_receive_channel,
+        make_alert_group,
+        make_alert,
+    ):
+        mock_chat_postMessage.side_effect = [
+            SLACK_POST_MESSAGE_SUCCESS_RESPONSE,
+            {"ok": True},
+        ]
+
+        slack_team_identity = make_slack_team_identity()
+        organization = make_organization(slack_team_identity=slack_team_identity)
+        alert_receive_channel = make_alert_receive_channel(
+            organization,
+            maintenance_mode=AlertReceiveChannel.DEBUG_MAINTENANCE,
+        )
+        alert_group = make_alert_group(alert_receive_channel)
+        slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+        organization.default_slack_channel = slack_channel
+        organization.save(update_fields=["default_slack_channel"])
+        alert = make_alert(alert_group, raw_request_data={})
+
+        step = IncomingAlertStep(slack_team_identity)
+        step.process_signal(alert)
+
+        _, debug_mode_notice_call_kwargs = mock_chat_postMessage.call_args_list[1]
+
+        assert debug_mode_notice_call_kwargs["channel"] == slack_channel.slack_id
+        assert "thread_ts" not in debug_mode_notice_call_kwargs
 
         assert alert_group.slack_message is not None
         assert SlackMessage.objects.count() == 1

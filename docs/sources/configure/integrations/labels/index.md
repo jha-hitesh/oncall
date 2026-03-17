@@ -26,7 +26,27 @@ This feature is available exclusively on Grafana Cloud.
 {{< /admonition >}}
 
 Labels are a powerful feature in Grafana OnCall that can help categorize and organize your integrations and alert groups.
-This guide walks through how to assign labels to integrations, filter integrations by labels, and explore the various features related to alert group labeling.
+This guide walks through how to manage reusable label keys and values, assign labels to integrations, filter resources by labels,
+and use labels in alert group mapping.
+
+## Manage label keys and values
+
+Use the **Labels** page to create and maintain reusable label keys and values for your organization.
+
+From this page you can:
+
+- create label keys and values before they are used by an integration
+- mark a key as a managed label
+- assign colors to keys and values for easier scanning in the UI
+- rename or delete existing keys and values
+- review how many values are defined for a key
+
+You can manage keys in the **Keys** tab and individual values in the **Values** tab.
+
+{{< admonition type="note" >}}
+Access to the **Labels** page is controlled by RBAC permissions. Users typically need label read access to view labels,
+label write access to update keys and values, and label create access to create new keys.
+{{< /admonition >}}
 
 ## Integrations and labels
 
@@ -38,7 +58,7 @@ To assign labels to an integration:
 1. Go to the **Integrations** tab and select an integration from the list.
 2. Click the **three dots** next to the integration name and select **Integration settings**.
 3. Click **Add** button in the **Integration labels** section. You can remove a label using the X button next to the key-value pair.
-4. Define a Key and Value pair for the label, either by selecting from an existing list or typing new ones in the fields. Press enter/return to accept.
+4. Define a key and value pair for the label, either by selecting from an existing list or typing new ones in the fields. Press enter/return to accept.
 5. Click **Save** when finished.
 
 To filter integrations by labels:
@@ -48,15 +68,17 @@ To filter integrations by labels:
 3. Start typing to find suggestions and select the key-value pair you’d like to filter by.
 
 Labels are automatically assigned to each alert group based on the labels assigned to the integration.
+Static integration labels use the exact key/value pair configured on the integration.
 
 ## Alert Group labels
 
-Alert Group labels offer more granular control. With Alert Group labeling, you can:
+Alert Group labels offer more granular control. With alert group labeling, you can:
 
-- Assign labels to alert groups.
+- Assign static labels to alert groups.
 - Filter alert groups by labels.
 - Customize the Alert Group table.
 - Pass labels in Webhooks.
+- Use predefined label values or Jinja-based dynamic values.
 
 ### Assign labels to Alert Groups
 
@@ -69,19 +91,24 @@ Alert Group labeling can be configured for each integration. To find the Alert G
 
 A maximum of 15 labels can be assigned to an alert group. If there are more than 15 labels, only the first 15 will be assigned.
 
-### Dynamic Labels
+### Dynamic labels
 
-Dynamic labels allow you to assign arbitrary labels to alert groups.
-Dynamic labels have values extracted from the alert payload using Jinja, with keys remaining static.
-These labels will not be attached to the integration.
+Dynamic labels allow you to assign labels to alert groups using values extracted from the incoming payload.
+The key remains fixed, while the value can either be rendered from a Jinja template or chosen from an existing
+label value when a workflow supports predefined dynamic selections.
+
+Dynamic labels are attached to the alert group, not to the integration itself.
 
 1. In the **Integration settings** tab, navigate to **Dynamic Labels**.
 2. Press the **Add Label** button.
 
-#### Add Dynamic Labels
+#### Add dynamic labels
 
 1. Choose or create a key from the dropdown list.
 2. Enter a template to parse the value for the given key from the alert payload.
+
+You can also keep using existing static key/value pairs in the same mapping section.
+This is useful when some labels should always be applied, while others should be derived from the payload.
 
 To illustrate the Dynamic Labeling feature, let's consider an example where a dynamic label is created with a `severity` key
 and a template to parse values for that key:
@@ -163,7 +190,7 @@ An advanced example showcases the extraction of labels from various fields of th
 {{ labels | tojson }}
 ```
 
-### Alert Group table customization
+### Alert group table customization
 
 The Alert Group table can be customized to suit individual preferences.
 You can select and manage the columns displayed in the table, and add custom columns based on labels.
@@ -175,7 +202,7 @@ By default, the Columns dropdown provides a list of predefined columns that user
 
 To manage default columns use the toggler next to each column name to enable or disable its visibility in the table.
 
-#### Add Custom columns
+#### Add custom columns
 
 Users with admin permissions have the ability to add custom columns based on labels. Follow these steps to add a custom column:
 
@@ -194,3 +221,7 @@ from the first alert in the group will be assigned.
 **Label persistence:**
 Once a label is assigned to an alert group, it remains unchanged, even if the label is edited.
 This approach considers the label as historical data.
+
+**Deletion behavior:**
+Deleting a label key or value removes it from future selection and also removes existing associations that reference that
+deleted key or value.
