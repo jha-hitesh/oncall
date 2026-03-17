@@ -5,7 +5,11 @@ from django.urls import reverse
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
 from apps.alerts.constants import ActionSource
-from apps.alerts.incident_appearance.renderers.phone_call_renderer import AlertGroupPhoneCallRenderer
+from apps.alerts.incident_appearance.renderers.phone_call_renderer import (
+    AlertGroupPhoneCallBundleRenderer,
+    AlertGroupPhoneCallRenderer,
+)
+from apps.alerts.models import BundledNotification
 from apps.base.utils import live_settings
 from apps.twilioapp.models import TwilioPhoneCall
 from common.api_helpers.utils import create_engine_url
@@ -204,6 +208,15 @@ def get_repeat_message(call_sid: str) -> str | None:
         logger.info(f"twilioapp.get_repeat_message: twilio_phone_call has no phone_call_record sid={call_sid}")
         return None
 
+    if phone_call_record.represents_bundle_uuid:
+        notifications = BundledNotification.objects.filter(bundle_uuid=phone_call_record.represents_bundle_uuid)
+        if not notifications.exists():
+            logger.info(
+                f"twilioapp.get_repeat_message: phone_call_record bundle has no notifications sid={call_sid}"
+            )
+            return None
+        return AlertGroupPhoneCallBundleRenderer(notifications).render()
+
     alert_group = phone_call_record.represents_alert_group
     if alert_group is None:
         logger.info(f"twilioapp.get_repeat_message: phone_call_record has no alert_group sid={call_sid}")
@@ -239,20 +252,43 @@ def process_digit(call_sid, action):
             return
 
         logger.info(f"twilioapp.process_digit: found phone_call_record id={phone_call_record.id} sid={call_sid}")
-        alert_group = phone_call_record.represents_alert_group
         user = phone_call_record.receiver
-        logger.info(
-            f"twilioapp.process_digit: processing action phone_call_record id={phone_call_record.id} "
-            f"twilio_phone_call_sid={call_sid} action={action} alert_group_id={alert_group.id} user_id={user.id}"
-        )
-        if action == "acknowledge":
-            alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
-        elif action == "resolve":
-            alert_group.resolve_by_user_or_backsync(user, action_source=ActionSource.PHONE)
-        elif action == "silence":
-            alert_group.silence_by_user_or_backsync(
-                user, silence_delay=get_phone_call_silence_in_minutes() * 60, action_source=ActionSource.PHONE
+        if phone_call_record.represents_bundle_uuid:
+            notifications = BundledNotification.objects.filter(
+                bundle_uuid=phone_call_record.represents_bundle_uuid
+            ).select_related("alert_group")
+            alert_groups = []
+            for notification in notifications:
+                if notification.alert_group not in alert_groups:
+                    alert_groups.append(notification.alert_group)
+            logger.info(
+                f"twilioapp.process_digit: processing bundled action phone_call_record id={phone_call_record.id} "
+                f"twilio_phone_call_sid={call_sid} action={action} bundle_uuid={phone_call_record.represents_bundle_uuid} "
+                f"user_id={user.id} alert_group_count={len(alert_groups)}"
             )
+            for alert_group in alert_groups:
+                if action == "acknowledge":
+                    alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+                elif action == "resolve":
+                    alert_group.resolve_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+                elif action == "silence":
+                    alert_group.silence_by_user_or_backsync(
+                        user, silence_delay=get_phone_call_silence_in_minutes() * 60, action_source=ActionSource.PHONE
+                    )
+        else:
+            alert_group = phone_call_record.represents_alert_group
+            logger.info(
+                f"twilioapp.process_digit: processing action phone_call_record id={phone_call_record.id} "
+                f"twilio_phone_call_sid={call_sid} action={action} alert_group_id={alert_group.id} user_id={user.id}"
+            )
+            if action == "acknowledge":
+                alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+            elif action == "resolve":
+                alert_group.resolve_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+            elif action == "silence":
+                alert_group.silence_by_user_or_backsync(
+                    user, silence_delay=get_phone_call_silence_in_minutes() * 60, action_source=ActionSource.PHONE
+                )
 
 
 def get_gather_url():

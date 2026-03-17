@@ -432,30 +432,23 @@ def test_perform_notification_use_default_notification_policy_fallback(
 @pytest.mark.django_db
 def test_notify_user_task_notification_bundle_is_enabled(
     make_organization_and_user,
-    make_user_for_organization,
     make_user_notification_policy,
     make_alert_receive_channel,
     make_alert_group,
     settings,
 ):
-    settings.FEATURE_NOTIFICATION_BUNDLE_ENABLED = True
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
     organization, user_1 = make_organization_and_user()
-    user_2 = make_user_for_organization(organization)
     make_user_notification_policy(
         user=user_1,
         step=UserNotificationPolicy.Step.NOTIFY,
-        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in NOTIFICATION_CHANNELS_TO_BUNDLE
+        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE
     )
     make_user_notification_policy(
         user=user_1,
         step=UserNotificationPolicy.Step.NOTIFY,
         notify_by=UserNotificationPolicy.NotificationChannel.SMS,
         important=True,
-    )
-    make_user_notification_policy(
-        user=user_2,
-        step=UserNotificationPolicy.Step.NOTIFY,
-        notify_by=UserNotificationPolicy.NotificationChannel.SLACK,  # channel is not in NOTIFICATION_CHANNELS_TO_BUNDLE
     )
     alert_receive_channel = make_alert_receive_channel(organization=organization)
     alert_group_1 = make_alert_group(alert_receive_channel=alert_receive_channel)
@@ -480,10 +473,40 @@ def test_notify_user_task_notification_bundle_is_enabled(
     important_notification_bundle = user_1.notification_bundles.get(important=True)
     assert important_notification_bundle.notification_task_id is None
     assert not important_notification_bundle.notifications.exists()
-    # send notification to user_2 (notification channel is not in NOTIFICATION_CHANNELS_TO_BUNDLE),
-    # check notification_bundle was not created
-    notify_user_task(user_2.id, alert_group_1.id)
-    assert not user_2.notification_bundles.exists()
+
+
+@pytest.mark.django_db
+def test_notify_user_task_phone_call_notification_bundle_is_enabled(
+    make_organization_and_user,
+    make_user_notification_policy,
+    make_alert_receive_channel,
+    make_alert_group,
+    settings,
+):
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
+    organization, user = make_organization_and_user()
+    make_user_notification_policy(
+        user=user,
+        step=UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization=organization)
+    alert_group_1 = make_alert_group(alert_receive_channel=alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel=alert_receive_channel)
+
+    assert not user.notification_bundles.exists()
+
+    notify_user_task(user.id, alert_group_1.id)
+    notification_bundle = user.notification_bundles.get(
+        notification_channel=UserNotificationPolicy.NotificationChannel.PHONE_CALL
+    )
+    assert notification_bundle.notification_task_id is None
+    assert not notification_bundle.notifications.exists()
+
+    notify_user_task(user.id, alert_group_2.id)
+    notification_bundle.refresh_from_db()
+    assert notification_bundle.notifications.count() == 1
+    assert notification_bundle.notification_task_id is not None
 
 
 @pytest.mark.django_db
@@ -494,12 +517,12 @@ def test_notify_user_task_notification_bundle_is_not_enabled(
     make_alert_group,
     settings,
 ):
-    settings.FEATURE_NOTIFICATION_BUNDLE_ENABLED = False
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = []
     organization, user = make_organization_and_user()
     make_user_notification_policy(
         user=user,
         step=UserNotificationPolicy.Step.NOTIFY,
-        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in NOTIFICATION_CHANNELS_TO_BUNDLE
+        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE
     )
     alert_receive_channel = make_alert_receive_channel(organization=organization)
     alert_group = make_alert_group(alert_receive_channel=alert_receive_channel)
@@ -519,12 +542,12 @@ def test_send_bundle_notification(
     settings,
     caplog,
 ):
-    settings.FEATURE_NOTIFICATION_BUNDLE_ENABLED = True
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
     organization, user = make_organization_and_user()
     notification_policy = make_user_notification_policy(
         user=user,
         step=UserNotificationPolicy.Step.NOTIFY,
-        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in NOTIFICATION_CHANNELS_TO_BUNDLE
+        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE
     )
     alert_receive_channel = make_alert_receive_channel(organization=organization)
     alert_group_1 = make_alert_group(alert_receive_channel=alert_receive_channel)
@@ -606,7 +629,7 @@ def test_send_bundle_notification_task_id_mismatch(
     settings,
     caplog,
 ):
-    settings.FEATURE_NOTIFICATION_BUNDLE_ENABLED = True
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
     organization, user = make_organization_and_user()
     notification_bundle = make_user_notification_bundle(
         user, UserNotificationPolicy.NotificationChannel.SMS, notification_task_id="test_task_id", eta=timezone.now()
@@ -629,12 +652,12 @@ def test_notify_user_task_notification_bundle_eta_is_outdated(
     make_alert_group,
     settings,
 ):
-    settings.FEATURE_NOTIFICATION_BUNDLE_ENABLED = True
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
     organization, user = make_organization_and_user()
     notification_policy = make_user_notification_policy(
         user=user,
         step=UserNotificationPolicy.Step.NOTIFY,
-        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in NOTIFICATION_CHANNELS_TO_BUNDLE
+        notify_by=UserNotificationPolicy.NotificationChannel.SMS,  # channel is in FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE
     )
     alert_receive_channel = make_alert_receive_channel(organization=organization)
     alert_group_1 = make_alert_group(alert_receive_channel=alert_receive_channel)

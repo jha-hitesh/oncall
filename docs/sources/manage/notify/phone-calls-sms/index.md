@@ -50,6 +50,9 @@ OnCall reduces alert noise and distraction by bundling SMS notifications.
 When multiple alert groups require notification within a short period, the first alert group triggers an immediate SMS.
 A 2-minute "waiting period" follows, during which additional alerts are bundled. After this period, a single SMS with all alert information is sent.
 
+Phone call notifications follow the same bundling behavior.
+The first alert group triggers an immediate call, and additional alert groups within the same 2-minute window are grouped into a single follow-up call.
+
 Notifications are bundled based on their importance. Alerts from "default" and "important" notification policies are bundled separately.
 
 ### Example

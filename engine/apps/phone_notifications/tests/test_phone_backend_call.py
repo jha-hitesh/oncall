@@ -225,3 +225,44 @@ def test_notify_by_cloud_call_handles_exceptions_from_cloud(
         ).count()
         == 1
     )
+
+
+@pytest.mark.django_db
+@mock.patch("apps.phone_notifications.phone_backend.PhoneBackend._notify_by_provider_call")
+@override_settings(GRAFANA_CLOUD_NOTIFICATIONS_ENABLED=False)
+def test_notify_by_call_bundle_uses_provider(
+    mock_notify_by_provider_call,
+    make_organization_and_user,
+    make_user_notification_policy,
+    make_user_notification_bundle,
+    make_alert_receive_channel,
+    make_alert_group,
+):
+    organization, user = make_organization_and_user()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group_1 = make_alert_group(alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel)
+    notification_policy = make_user_notification_policy(
+        user, UserNotificationPolicy.Step.NOTIFY, notify_by=UserNotificationPolicy.NotificationChannel.PHONE_CALL
+    )
+    notification_bundle = make_user_notification_bundle(
+        user, UserNotificationPolicy.NotificationChannel.PHONE_CALL, notification_task_id="task", eta=None
+    )
+    notification_bundle.append_notification(alert_group_1, notification_policy)
+    notification_bundle.append_notification(alert_group_2, notification_policy)
+    bundle_uuid = "bundle-call"
+    notification_bundle.notifications.update(bundle_uuid=bundle_uuid)
+
+    phone_backend = PhoneBackend()
+    phone_backend.notify_by_call_bundle(user, bundle_uuid)
+
+    assert mock_notify_by_provider_call.called
+    assert (
+        PhoneCallRecord.objects.filter(
+            represents_alert_group=alert_group_1,
+            represents_bundle_uuid=bundle_uuid,
+            notification_policy=notification_policy,
+            receiver=user,
+        ).count()
+        == 1
+    )

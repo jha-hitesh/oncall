@@ -259,10 +259,7 @@ def notify_user_task(
                         notification_error_code=UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_POSTING_TO_SLACK_IS_DISABLED,
                     )
                 else:
-                    if (
-                        settings.FEATURE_NOTIFICATION_BUNDLE_ENABLED
-                        and UserNotificationBundle.notification_is_bundleable(notification_policy.notify_by)
-                    ):
+                    if UserNotificationBundle.notification_is_bundleable(notification_policy.notify_by):
                         user_notification_bundle, _ = UserNotificationBundle.objects.select_for_update().get_or_create(
                             user=user, important=important, notification_channel=notification_policy.notify_by
                         )
@@ -704,6 +701,8 @@ def send_bundled_notification(user_notification_bundle_id: int):
                 )
                 if user_notification_bundle.notification_channel == UserNotificationPolicy.NotificationChannel.SMS:
                     PhoneBackend.notify_by_sms_bundle_async(user_notification_bundle.user, bundle_uuid)
+                elif user_notification_bundle.notification_channel == UserNotificationPolicy.NotificationChannel.PHONE_CALL:
+                    PhoneBackend.notify_by_call_bundle_async(user_notification_bundle.user, bundle_uuid)
 
         user_notification_bundle.notification_task_id = None
         user_notification_bundle.last_notified_at = timezone.now()

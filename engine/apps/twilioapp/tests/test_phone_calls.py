@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 from bs4 import BeautifulSoup
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
 from django.utils.http import urlencode
 from rest_framework.test import APIClient
@@ -109,6 +110,136 @@ def test_update_status(mock_has_permission, make_twilio_phone_call):
 
         twilio_phone_call.refresh_from_db()
         assert twilio_phone_call.status == TwilioCallStatuses.DETERMINANT[status]
+
+
+@mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
+@pytest.mark.django_db
+def test_update_status_for_bundled_notifications(
+    mock_has_permission,
+    make_organization_and_user,
+    make_alert_receive_channel,
+    make_user_notification_policy,
+    make_user_notification_bundle,
+    make_alert_group,
+    make_phone_call_record,
+):
+    organization, user = make_organization_and_user()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group_1 = make_alert_group(alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel)
+    notification_policy = make_user_notification_policy(
+        user=user,
+        step=UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+    )
+
+    notification_bundle = make_user_notification_bundle(
+        user, UserNotificationPolicy.NotificationChannel.PHONE_CALL, notification_task_id="test_task_id", eta=timezone.now()
+    )
+    notification_bundle.append_notification(alert_group_1, notification_policy)
+    notification_bundle.append_notification(alert_group_2, notification_policy)
+    bundle_uuid = "test_call_bundle"
+    notification_bundle.notifications.update(bundle_uuid=bundle_uuid)
+
+    phone_call_record = make_phone_call_record(
+        receiver=user,
+        represents_alert_group=alert_group_1,
+        represents_bundle_uuid=bundle_uuid,
+        notification_policy=notification_policy,
+    )
+    twilio_phone_call = TwilioPhoneCall.objects.create(
+        sid="SMa12312312a123a123123c6dd2f1aee77", phone_call_record=phone_call_record
+    )
+
+    mock_has_permission.return_value = True
+    data = {
+        "CallSid": twilio_phone_call.sid,
+        "CallStatus": "completed",
+        "AccountSid": "Because of mock_has_permission there are may be any value",
+    }
+
+    client = APIClient()
+    response = client.post(
+        path=reverse("twilioapp:call_status_events"),
+        data=urlencode(MultiValueDict(data), doseq=True),
+        content_type="application/x-www-form-urlencoded",
+    )
+
+    assert response.status_code == 204
+    assert response.data == ""
+    assert user.personal_log_records.count() == 2
+
+
+@mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
+@mock.patch("apps.twilioapp.gather.get_gather_url")
+@mock.patch("apps.twilioapp.gather.live_settings")
+@pytest.mark.django_db
+def test_acknowledge_bundled_call(
+    mock_live_settings,
+    mock_get_gather_url,
+    mock_has_permission,
+    make_organization_and_user,
+    make_alert_receive_channel,
+    make_user_notification_policy,
+    make_user_notification_bundle,
+    make_alert_group,
+    make_phone_call_record,
+):
+    organization, user = make_organization_and_user()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group_1 = make_alert_group(alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel)
+    notification_policy = make_user_notification_policy(
+        user=user,
+        step=UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+    )
+    notification_bundle = make_user_notification_bundle(
+        user, UserNotificationPolicy.NotificationChannel.PHONE_CALL, notification_task_id="test_task_id", eta=timezone.now()
+    )
+    notification_bundle.append_notification(alert_group_1, notification_policy)
+    notification_bundle.append_notification(alert_group_2, notification_policy)
+    bundle_uuid = "test_call_bundle_ack"
+    notification_bundle.notifications.update(bundle_uuid=bundle_uuid)
+    phone_call_record = make_phone_call_record(
+        receiver=user,
+        represents_alert_group=alert_group_1,
+        represents_bundle_uuid=bundle_uuid,
+        notification_policy=notification_policy,
+    )
+    twilio_phone_call = TwilioPhoneCall.objects.create(
+        sid="SMa12312312a123a123123c6dd2f1aee77", phone_call_record=phone_call_record
+    )
+
+    mock_has_permission.return_value = True
+    mock_get_gather_url.return_value = reverse("twilioapp:gather")
+    mock_live_settings.PHONE_CALL_INSTRUCTIONS_CONFIG = {
+        "acknowledge_button": "1",
+        "resolve_button": "2",
+        "silence_button": "3",
+    }
+    mock_live_settings.PHONE_CALL_INSTRUCTIONS_TEMPLATE = None
+
+    response = APIClient().post(
+        reverse("twilioapp:gather"),
+        data=urlencode(
+            MultiValueDict(
+                {
+                    "CallSid": twilio_phone_call.sid,
+                    "Digits": "1",
+                    "AccountSid": "Because of mock_has_permission there are may be any value",
+                }
+            ),
+            doseq=True,
+        ),
+        content_type="application/x-www-form-urlencoded",
+    )
+
+    assert response.status_code == 200
+    alert_group_1.refresh_from_db()
+    alert_group_2.refresh_from_db()
+    assert alert_group_1.acknowledged is True
+    assert alert_group_2.acknowledged is True
 
 
 @mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
