@@ -2,6 +2,7 @@ import logging
 import urllib.parse
 from string import digits
 
+import requests
 from django.db.models import F, Q
 from phonenumbers import COUNTRY_CODE_TO_REGION_CODE
 from twilio.base.exceptions import TwilioRestException
@@ -280,7 +281,16 @@ class TwilioPhoneProvider(PhoneProvider):
         return live_settings.TWILIO_NUMBER
 
     def _twilio_sender(self, sender_model, to):
-        _, _, country_code = self._parse_number(to)
+        try:
+            _, _, country_code = self._parse_number(to)
+        except requests.RequestException as e:
+            logger.warning(
+                "TwilioPhoneProvider._twilio_sender: failed to resolve sender country for %s, "
+                "falling back to default sender: %s",
+                to,
+                e,
+            )
+            country_code = None
         sender = (
             sender_model.objects.filter(Q(country_code=country_code) | Q(country_code__isnull=True))
             .order_by(F("country_code").desc(nulls_last=True))

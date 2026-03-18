@@ -167,6 +167,58 @@ def getenv_list(variable_name: str, default: list) -> list:
     return json.loads(value)
 
 
+def get_notification_channels_to_bundle() -> list[str]:
+    allowed_values = {"SMS", "PHONE_CALL"}
+    channels = [
+        channel.strip().upper()
+        for channel in os.environ.get("FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE", "SMS").split(",")
+    ]
+    channels = [channel for channel in channels if channel]
+
+    invalid_channels = sorted(set(channels) - allowed_values)
+    if invalid_channels:
+        raise ValueError(
+            "Invalid FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE env variable values: "
+            f"{', '.join(invalid_channels)}. Allowed values are: SMS, PHONE_CALL"
+        )
+
+    return channels
+
+
+def is_valid_phone_call_button(value) -> bool:
+    if value is None:
+        return False
+    value = str(value)
+    return value.isdigit() or value in {"*", "#"}
+
+
+def get_default_phone_call_instructions_template(config: dict) -> str:
+    action_phrases = []
+    acknowledge_button = config.get("acknowledge_button")
+    if is_valid_phone_call_button(acknowledge_button):
+        action_phrases.append(f"Press {{acknowledge_button}} to acknowledge")
+
+    resolve_button = config.get("resolve_button")
+    if is_valid_phone_call_button(resolve_button):
+        action_phrases.append("{resolve_button} to resolve")
+
+    silence_button = config.get("silence_button")
+    if is_valid_phone_call_button(silence_button):
+        action_phrases.append("{silence_button} to silence for {silence_in_minutes} minutes")
+
+    repeat_button = config.get("repeat_button")
+    if is_valid_phone_call_button(repeat_button):
+        action_phrases.append("{repeat_button} to repeat this message")
+
+    if not action_phrases:
+        return "No phone call actions are configured"
+    if len(action_phrases) == 1:
+        return action_phrases[0]
+    if len(action_phrases) == 2:
+        return " and ".join(action_phrases)
+    return ", ".join(action_phrases[:-1]) + f" and {action_phrases[-1]}"
+
+
 def batch_queryset(qs, batch_size=1000):
     qs_count = qs.count()
     for start in range(0, qs_count, batch_size):

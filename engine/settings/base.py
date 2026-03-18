@@ -8,7 +8,14 @@ from celery.schedules import crontab
 from firebase_admin import credentials, initialize_app
 
 from common.api_helpers.custom_ratelimit import getenv_custom_ratelimit
-from common.utils import getenv_boolean, getenv_float, getenv_integer, getenv_list
+from common.utils import (
+    get_default_phone_call_instructions_template,
+    get_notification_channels_to_bundle,
+    getenv_boolean,
+    getenv_float,
+    getenv_integer,
+    getenv_list,
+)
 
 VERSION = "dev-oss"
 SEND_ANONYMOUS_USAGE_STATS = getenv_boolean("SEND_ANONYMOUS_USAGE_STATS", default=True)
@@ -82,11 +89,9 @@ FEATURE_LABELS_KEY_DEFAULT_COLOR = os.environ.get("FEATURE_LABELS_KEY_DEFAULT_CO
 FEATURE_LABELS_VALUE_DEFAULT_COLOR = os.environ.get("FEATURE_LABELS_VALUE_DEFAULT_COLOR", "#f54242")
 FEATURE_ALERT_GROUP_SEARCH_ENABLED = getenv_boolean("FEATURE_ALERT_GROUP_SEARCH_ENABLED", default=True)
 FEATURE_ALERT_GROUP_SEARCH_CUTOFF_DAYS = getenv_integer("FEATURE_ALERT_GROUP_SEARCH_CUTOFF_DAYS", default=None)
-FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = [
-    channel.strip()
-    for channel in os.environ.get("FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE", "SMS").split(",")
-    if channel.strip()
-]
+
+
+FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = get_notification_channels_to_bundle()
 FEATURE_DECLARE_INCIDENT_STEP_ENABLED = getenv_boolean("FEATURE_DECLARE_INCIDENT_STEP_ENABLED", default=False)
 FEATURE_SERVICE_DEPENDENCIES_ENABLED = getenv_boolean("FEATURE_SERVICE_DEPENDENCIES_ENABLED", default=False)
 SCHEDULE_MANAGEMENT_REQUIRE_ADMIN = getenv_boolean("SCHEDULE_MANAGEMENT_REQUIRE_ADMIN", default=False)
@@ -1065,41 +1070,25 @@ ALERT_GROUP_PHONE_CALL_TEMPLATE = os.getenv("ALERT_GROUP_PHONE_CALL_TEMPLATE") o
     "Alert via {integration_name} with title {title} triggered {alert_count} times"
 )
 
+NOTIFICATION_BUNDLE_SMS_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_SMS_TEMPLATE") or (
+    "Grafana OnCall: "
+    "Alert group{% if total_alert_groups != 1 %}s{% endif %} {{ alert_group_codes[:3] | join(', ') }}"
+    "{% if total_alert_groups > 3 %} and {{ total_alert_groups - 3 }} more{% endif %} "
+    "from stack: {{ stack_slug }}, "
+    "integration{% if total_channels != 1 %}s{% endif %}: {{ channel_names[:1] | join(', ') }}"
+    "{% if total_channels > 1 %} and {{ total_channels - 1 }} more{% endif %}."
+)
 
-def _is_valid_phone_call_button(value):
-    if value is None:
-        return False
-    value = str(value)
-    return value.isdigit() or value in {"*", "#"}
-
-
-def _get_default_phone_call_instructions_template(config):
-    action_phrases = []
-    acknowledge_button = config.get("acknowledge_button")
-    if _is_valid_phone_call_button(acknowledge_button):
-        action_phrases.append(f"Press {{acknowledge_button}} to acknowledge")
-
-    resolve_button = config.get("resolve_button")
-    if _is_valid_phone_call_button(resolve_button):
-        action_phrases.append("{resolve_button} to resolve")
-
-    silence_button = config.get("silence_button")
-    if _is_valid_phone_call_button(silence_button):
-        action_phrases.append("{silence_button} to silence for {silence_in_minutes} minutes")
-
-    repeat_button = config.get("repeat_button")
-    if _is_valid_phone_call_button(repeat_button):
-        action_phrases.append("{repeat_button} to repeat this message")
-
-    if not action_phrases:
-        return "No phone call actions are configured"
-    if len(action_phrases) == 1:
-        return action_phrases[0]
-    if len(action_phrases) == 2:
-        return " and ".join(action_phrases)
-    return ", ".join(action_phrases[:-1]) + f" and {action_phrases[-1]}"
-
-
+NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE") or (
+    "{% if total_alert_groups == 0 %}Grafana OnCall. Multiple alert groups require your attention."
+    "{% else %}Grafana OnCall. "
+    "Alert group{% if total_alert_groups != 1 %}s{% endif %} {{ alert_group_codes[:3] | join(', ') }}"
+    "{% if total_alert_groups > 3 %} and {{ total_alert_groups - 3 }} more{% endif %}. "
+    "From stack {{ stack_slug }}. "
+    "Triggered by integration{% if total_channels != 1 %}s{% endif %} {{ channel_names[:1] | join(', ') }}"
+    "{% if total_channels > 1 %} and {{ total_channels - 1 }} more{% endif %}."
+    "{% endif %}"
+)
 PHONE_CALL_INSTRUCTIONS_CONFIG = json.loads(
     os.getenv(
         "PHONE_CALL_INSTRUCTIONS_CONFIG",
@@ -1114,5 +1103,5 @@ PHONE_CALL_INSTRUCTIONS_CONFIG = json.loads(
     )
 )
 PHONE_CALL_INSTRUCTIONS_TEMPLATE = os.getenv("PHONE_CALL_INSTRUCTIONS_TEMPLATE") or (
-    _get_default_phone_call_instructions_template(PHONE_CALL_INSTRUCTIONS_CONFIG)
+    get_default_phone_call_instructions_template(PHONE_CALL_INSTRUCTIONS_CONFIG)
 )

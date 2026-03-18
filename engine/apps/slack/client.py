@@ -1,6 +1,7 @@
 import logging
 import typing
 from typing import Optional, Tuple
+from urllib.error import URLError
 
 from django.utils import timezone
 from rest_framework import status
@@ -128,6 +129,15 @@ class SlackClient(WebClient):
             response = super().api_call(*args, **kwargs)
             self._unmark_token_revoked()  # unmark token as revoked if the API call was successful
             return response
+        except URLError as e:
+            logger.error(
+                "Slack API transport error! slack_team_identity=%s args=%s kwargs=%s error=%r",
+                self.slack_team_identity.pk,
+                args,
+                kwargs,
+                e,
+            )
+            raise SlackAPIServerError({"status": 503, "headers": {}, "body": str(e)}) from e
         except SlackSDKApiError as e:
             logger.error(
                 "Slack API call error! slack_team_identity={} args={} kwargs={} status={} error={} response={}".format(
