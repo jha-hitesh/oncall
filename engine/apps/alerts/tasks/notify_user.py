@@ -687,6 +687,14 @@ def send_bundled_notification(user_notification_bundle_id: int):
                 )
             )
         else:
+            if user_notification_bundle.notification_channel in [
+                UserNotificationPolicy.NotificationChannel.SMS,
+                UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+            ]:
+                for log_record in log_records_to_create:
+                    if log_record.type == UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_TRIGGERED:
+                        log_record.reason = UserNotificationPolicyLogRecord.REASON_BUNDLED_NOTIFICATION
+
             UserNotificationPolicyLogRecord.objects.bulk_create(log_records_to_create, batch_size=5000)
 
             if not active_alert_group_ids or not is_notification_allowed:

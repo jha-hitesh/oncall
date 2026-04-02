@@ -1,7 +1,6 @@
-from unittest.mock import patch
-
 import pytest
 from django.utils import timezone
+from unittest.mock import patch
 from telegram.error import RetryAfter
 
 from apps.alerts.models import AlertGroup
@@ -640,6 +639,98 @@ def test_send_bundle_notification_task_id_mismatch(
         f"Duplication or non-active notification triggered. "
         f"Active: {notification_bundle.notification_task_id}"
     ) in caplog.text
+
+
+@pytest.mark.django_db
+@patch("apps.alerts.tasks.notify_user.PhoneBackend.notify_by_call_bundle_async")
+def test_send_bundled_phone_call_marks_timeline_message(
+    mock_notify_by_call_bundle_async,
+    make_organization_and_user,
+    make_user_notification_bundle,
+    make_user_notification_policy,
+    make_alert_receive_channel,
+    make_alert_group,
+    settings,
+):
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
+    organization, user = make_organization_and_user()
+    notification_policy = make_user_notification_policy(
+        user=user,
+        step=UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization=organization)
+    alert_group_1 = make_alert_group(alert_receive_channel=alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel=alert_receive_channel)
+
+    task_id = "test_task_id"
+    notification_bundle = make_user_notification_bundle(
+        user,
+        UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+        notification_task_id=task_id,
+        eta=timezone.now(),
+    )
+    notification_bundle.append_notification(alert_group_1, notification_policy)
+    notification_bundle.append_notification(alert_group_2, notification_policy)
+
+    send_bundled_notification.apply((notification_bundle.id,), task_id=task_id)
+
+    assert mock_notify_by_call_bundle_async.called
+    log_records = user.personal_log_records.filter(
+        type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_TRIGGERED,
+        notification_channel=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+    ).order_by("alert_group_id")
+    assert log_records.count() == 2
+    assert all(
+        log_record.render_log_line_action() == f"called {user.username} by phone using bundled notification"
+        for log_record in log_records
+    )
+
+
+@pytest.mark.django_db
+@patch("apps.alerts.tasks.notify_user.PhoneBackend.notify_by_sms_bundle_async")
+def test_send_bundled_sms_marks_timeline_message(
+    mock_notify_by_sms_bundle_async,
+    make_organization_and_user,
+    make_user_notification_bundle,
+    make_user_notification_policy,
+    make_alert_receive_channel,
+    make_alert_group,
+    settings,
+):
+    settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = ["SMS", "PHONE_CALL"]
+    organization, user = make_organization_and_user()
+    notification_policy = make_user_notification_policy(
+        user=user,
+        step=UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.SMS,
+    )
+    alert_receive_channel = make_alert_receive_channel(organization=organization)
+    alert_group_1 = make_alert_group(alert_receive_channel=alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel=alert_receive_channel)
+
+    task_id = "test_task_id"
+    notification_bundle = make_user_notification_bundle(
+        user,
+        UserNotificationPolicy.NotificationChannel.SMS,
+        notification_task_id=task_id,
+        eta=timezone.now(),
+    )
+    notification_bundle.append_notification(alert_group_1, notification_policy)
+    notification_bundle.append_notification(alert_group_2, notification_policy)
+
+    send_bundled_notification.apply((notification_bundle.id,), task_id=task_id)
+
+    assert mock_notify_by_sms_bundle_async.called
+    log_records = user.personal_log_records.filter(
+        type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_TRIGGERED,
+        notification_channel=UserNotificationPolicy.NotificationChannel.SMS,
+    ).order_by("alert_group_id")
+    assert log_records.count() == 2
+    assert all(
+        log_record.render_log_line_action() == f"sent sms to {user.username} using bundled notification"
+        for log_record in log_records
+    )
 
 
 @pytest.mark.django_db
