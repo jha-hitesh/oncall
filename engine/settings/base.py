@@ -15,6 +15,10 @@ from common.utils import (
     getenv_float,
     getenv_integer,
     getenv_list,
+    parse_phone_call_instructions_config,
+    validate_alert_group_phone_call_template,
+    validate_notification_bundle_phonecall_template,
+    validate_phone_call_instructions_template,
 )
 
 VERSION = "dev-oss"
@@ -1069,6 +1073,12 @@ ALERT_GROUP_PHONE_CALL_TEMPLATE = os.getenv("ALERT_GROUP_PHONE_CALL_TEMPLATE") o
     "You are invited to check an Alert Group from Grafana OnCall. "
     "Alert via {integration_name} with title {title} triggered {alert_count} times"
 )
+alert_group_phone_call_template_error = validate_alert_group_phone_call_template(ALERT_GROUP_PHONE_CALL_TEMPLATE)
+if alert_group_phone_call_template_error is not None:
+    raise ValueError(
+        "Invalid ALERT_GROUP_PHONE_CALL_TEMPLATE env variable: "
+        f"{alert_group_phone_call_template_error}"
+    )
 
 NOTIFICATION_BUNDLE_SMS_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_SMS_TEMPLATE") or (
     "Grafana OnCall: "
@@ -1089,19 +1099,41 @@ NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_PHONECAL
     "{% if total_channels > 1 %} and {{ total_channels - 1 }} more{% endif %}."
     "{% endif %}"
 )
-PHONE_CALL_INSTRUCTIONS_CONFIG = json.loads(
-    os.getenv(
-        "PHONE_CALL_INSTRUCTIONS_CONFIG",
-        json.dumps(
-            {
-                "acknowledge_button": "1",
-                "resolve_button": "2",
-                "silence_button": "3",
-                "wait_time_for_user_action": 5,
-            }
-        ),
-    )
+notification_bundle_phonecall_template_error = validate_notification_bundle_phonecall_template(
+    NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE
 )
+if notification_bundle_phonecall_template_error is not None:
+    raise ValueError(
+        "Invalid NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE env variable: "
+        f"{notification_bundle_phonecall_template_error}"
+    )
+
+phone_call_instructions_config_raw = os.getenv(
+    "PHONE_CALL_INSTRUCTIONS_CONFIG",
+    json.dumps(
+        {
+            "acknowledge_button": "1",
+            "resolve_button": "2",
+            "silence_button": "3",
+            "wait_time_for_user_action": 5,
+        }
+    ),
+)
+PHONE_CALL_INSTRUCTIONS_CONFIG, phone_call_instructions_config_error = parse_phone_call_instructions_config(
+    phone_call_instructions_config_raw
+)
+if phone_call_instructions_config_error is not None:
+    raise ValueError(
+        "Invalid PHONE_CALL_INSTRUCTIONS_CONFIG env variable: "
+        f"{phone_call_instructions_config_error}"
+    )
+
 PHONE_CALL_INSTRUCTIONS_TEMPLATE = os.getenv("PHONE_CALL_INSTRUCTIONS_TEMPLATE") or (
     get_default_phone_call_instructions_template(PHONE_CALL_INSTRUCTIONS_CONFIG)
 )
+phone_call_instructions_template_error = validate_phone_call_instructions_template(PHONE_CALL_INSTRUCTIONS_TEMPLATE)
+if phone_call_instructions_template_error is not None:
+    raise ValueError(
+        "Invalid PHONE_CALL_INSTRUCTIONS_TEMPLATE env variable: "
+        f"{phone_call_instructions_template_error}"
+    )

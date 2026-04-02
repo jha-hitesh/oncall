@@ -1,2 +1,3 @@
 ## Testing
-- use docker container oncall_engine for backend testing and oncall_ui for frontend testing
+- run make init script to start docker setup for this repo
+- once startup is completed, then use the containers for testing

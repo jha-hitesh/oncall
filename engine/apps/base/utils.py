@@ -11,6 +11,7 @@ from twilio.base.exceptions import TwilioException
 from twilio.rest import Client
 
 from common.api_helpers.utils import create_engine_url
+from common.utils import validate_phone_call_instructions_config, validate_phone_call_instructions_template
 
 
 class LiveSettingProxy:
@@ -167,6 +168,14 @@ class LiveSettingValidator:
     @classmethod
     def _check_email_use_ssl(cls, email_use_ssl: bool) -> typing.Optional[str]:
         return cls.EMAIL_SSL_TLS_ERROR_MSG if live_settings.EMAIL_USE_TLS is True and email_use_ssl is True else None
+
+    @classmethod
+    def _check_phone_call_instructions_config(cls, phone_call_instructions_config):
+        return validate_phone_call_instructions_config(phone_call_instructions_config)
+
+    @classmethod
+    def _check_phone_call_instructions_template(cls, phone_call_instructions_template):
+        return validate_phone_call_instructions_template(phone_call_instructions_template)
 
     @staticmethod
     def _is_email_valid(email):
