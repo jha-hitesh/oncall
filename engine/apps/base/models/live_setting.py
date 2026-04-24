@@ -52,6 +52,7 @@ class LiveSetting(models.Model):
         "TWILIO_VERIFY_SERVICE_SID",
         "PHONE_CALL_INSTRUCTIONS_TEMPLATE",
         "PHONE_CALL_INSTRUCTIONS_CONFIG",
+        "PHONE_CALL_ACTION_RESPONSE_TEMPLATE",
         "NOTIFICATION_BUNDLE_SMS_TEMPLATE",
         "TELEGRAM_TOKEN",
         "TELEGRAM_WEBHOOK_HOST",
@@ -111,6 +112,11 @@ class LiveSetting(models.Model):
             "' target='_blank'>instruction</a> for details how to set up Slack. "
             "Slack secrets can't be verified on the backend, please try installing the Slack Bot "
             "after you update them."
+        ),
+        "PHONE_CALL_ACTION_RESPONSE_TEMPLATE": (
+            "Phone call action response messages (JSON object). "
+            "Controls default voice responses for phone-call actions (e.g., acknowledge/resolve/silence) "
+            "and the 'resolved recently' messaging."
         ),
         "SLACK_CLIENT_OAUTH_SECRET": (
             "Check <a href='"

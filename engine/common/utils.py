@@ -345,6 +345,46 @@ def validate_phone_call_instructions_config(config: str | dict | None) -> str | 
     return error
 
 
+PHONE_CALL_ACTION_RESPONSE_TEMPLATE_KEYS = {
+    "acknowledge_success_message",
+    "resolve_success_message",
+    "silence_success_message",
+    "acknowledge_skipped_resolved_message",
+    "acknowledge_bundle_skipped_resolved_message",
+    "acknowledge_bundle_all_resolved_message",
+}
+
+
+def parse_phone_call_action_response_template(template: str | dict | None) -> tuple[dict | None, str | None]:
+    if isinstance(template, str):
+        try:
+            template = json.loads(template)
+        except json.JSONDecodeError as err:
+            return None, f"Invalid JSON: {err.msg}"
+
+    if not isinstance(template, dict):
+        return None, "Must be a JSON object"
+
+    unknown_keys = set(template) - PHONE_CALL_ACTION_RESPONSE_TEMPLATE_KEYS
+    if unknown_keys:
+        unknown_key = sorted(unknown_keys)[0]
+        allowed_keys = ", ".join(sorted(PHONE_CALL_ACTION_RESPONSE_TEMPLATE_KEYS))
+        return None, f"Invalid key {unknown_key}: allowed keys are: {allowed_keys}"
+
+    for key, value in template.items():
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return None, f"Invalid value for {key}: expected a string"
+
+    return template, None
+
+
+def validate_phone_call_action_response_template(template: str | dict | None) -> str | None:
+    _, error = parse_phone_call_action_response_template(template)
+    return error
+
+
 def validate_phone_call_instructions_template(template: str) -> str | None:
     return validate_format_template(
         template,

@@ -246,6 +246,137 @@ def test_acknowledge_bundled_call(
 @mock.patch("apps.twilioapp.gather.get_gather_url")
 @mock.patch("apps.twilioapp.gather.live_settings")
 @pytest.mark.django_db
+def test_acknowledge_resolved_alert_group_by_phone(
+    mock_live_settings, mock_has_permission, mock_get_gather_url, make_twilio_phone_call
+):
+    twilio_phone_call = make_twilio_phone_call
+    alert_group = twilio_phone_call.phone_call_record.represents_alert_group
+    user = twilio_phone_call.phone_call_record.receiver
+
+    alert_group.resolve_by_user_or_backsync(user)
+    alert_group.refresh_from_db()
+    assert alert_group.resolved is True
+    assert alert_group.acknowledged is False
+
+    mock_has_permission.return_value = True
+    mock_get_gather_url.return_value = reverse("twilioapp:gather")
+    mock_live_settings.PHONE_CALL_INSTRUCTIONS_CONFIG = {
+        "acknowledge_button": "1",
+        "resolve_button": "2",
+        "silence_button": "3",
+    }
+    mock_live_settings.PHONE_CALL_INSTRUCTIONS_TEMPLATE = None
+
+    response = APIClient().post(
+        reverse("twilioapp:gather"),
+        data=urlencode(
+            MultiValueDict(
+                {
+                    "CallSid": twilio_phone_call.sid,
+                    "Digits": "1",
+                    "AccountSid": "Because of mock_has_permission there are may be any value",
+                }
+            ),
+            doseq=True,
+        ),
+        content_type="application/x-www-form-urlencoded",
+    )
+
+    content = response.content.decode("utf-8")
+    assert response.status_code == 200
+    assert "resolved recently" in content
+
+    alert_group.refresh_from_db()
+    assert alert_group.resolved is True
+    assert alert_group.acknowledged is False
+
+
+@mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
+@mock.patch("apps.twilioapp.gather.get_gather_url")
+@mock.patch("apps.twilioapp.gather.live_settings")
+@pytest.mark.django_db
+def test_acknowledge_bundled_call_skips_resolved_alert_groups(
+    mock_live_settings,
+    mock_get_gather_url,
+    mock_has_permission,
+    make_organization_and_user,
+    make_alert_receive_channel,
+    make_user_notification_policy,
+    make_user_notification_bundle,
+    make_alert_group,
+    make_phone_call_record,
+):
+    organization, user = make_organization_and_user()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group_1 = make_alert_group(alert_receive_channel)
+    alert_group_2 = make_alert_group(alert_receive_channel)
+    notification_policy = make_user_notification_policy(
+        user=user,
+        step=UserNotificationPolicy.Step.NOTIFY,
+        notify_by=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+    )
+    notification_bundle = make_user_notification_bundle(
+        user, UserNotificationPolicy.NotificationChannel.PHONE_CALL, notification_task_id="test_task_id", eta=timezone.now()
+    )
+    notification_bundle.append_notification(alert_group_1, notification_policy)
+    notification_bundle.append_notification(alert_group_2, notification_policy)
+    bundle_uuid = "test_call_bundle_ack_mixed"
+    notification_bundle.notifications.update(bundle_uuid=bundle_uuid)
+
+    alert_group_1.resolve_by_user_or_backsync(user)
+    alert_group_1.refresh_from_db()
+    assert alert_group_1.resolved is True
+
+    phone_call_record = make_phone_call_record(
+        receiver=user,
+        represents_alert_group=alert_group_1,
+        represents_bundle_uuid=bundle_uuid,
+        notification_policy=notification_policy,
+    )
+    twilio_phone_call = TwilioPhoneCall.objects.create(
+        sid="SMa12312312a123a123123c6dd2f1aee77", phone_call_record=phone_call_record
+    )
+
+    mock_has_permission.return_value = True
+    mock_get_gather_url.return_value = reverse("twilioapp:gather")
+    mock_live_settings.PHONE_CALL_INSTRUCTIONS_CONFIG = {
+        "acknowledge_button": "1",
+        "resolve_button": "2",
+        "silence_button": "3",
+    }
+    mock_live_settings.PHONE_CALL_INSTRUCTIONS_TEMPLATE = None
+
+    response = APIClient().post(
+        reverse("twilioapp:gather"),
+        data=urlencode(
+            MultiValueDict(
+                {
+                    "CallSid": twilio_phone_call.sid,
+                    "Digits": "1",
+                    "AccountSid": "Because of mock_has_permission there are may be any value",
+                }
+            ),
+            doseq=True,
+        ),
+        content_type="application/x-www-form-urlencoded",
+    )
+
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    assert "Acknowledged" in content
+    assert "resolved recently" in content
+
+    alert_group_1.refresh_from_db()
+    alert_group_2.refresh_from_db()
+    assert alert_group_1.resolved is True
+    assert alert_group_1.acknowledged is False
+    assert alert_group_2.acknowledged is True
+
+
+@mock.patch("apps.twilioapp.views.AllowOnlyTwilio.has_permission")
+@mock.patch("apps.twilioapp.gather.get_gather_url")
+@mock.patch("apps.twilioapp.gather.live_settings")
+@pytest.mark.django_db
 def test_acknowledge_by_phone(mock_live_settings, mock_has_permission, mock_get_gather_url, make_twilio_phone_call):
     twilio_phone_call = make_twilio_phone_call
     alert_group = twilio_phone_call.phone_call_record.represents_alert_group

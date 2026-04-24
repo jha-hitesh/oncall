@@ -13,6 +13,7 @@ from twilio.rest import Client
 from common.api_helpers.utils import create_engine_url
 from common.utils import (
     validate_notification_bundle_sms_template,
+    validate_phone_call_action_response_template,
     validate_phone_call_instructions_config,
     validate_phone_call_instructions_template,
 )
@@ -180,6 +181,10 @@ class LiveSettingValidator:
     @classmethod
     def _check_phone_call_instructions_template(cls, phone_call_instructions_template):
         return validate_phone_call_instructions_template(phone_call_instructions_template)
+
+    @classmethod
+    def _check_phone_call_action_response_template(cls, phone_call_action_response_template):
+        return validate_phone_call_action_response_template(phone_call_action_response_template)
 
     @classmethod
     def _check_notification_bundle_sms_template(cls, notification_bundle_sms_template):

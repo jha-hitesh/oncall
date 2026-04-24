@@ -13,16 +13,28 @@ from apps.alerts.models import BundledNotification
 from apps.base.utils import live_settings
 from apps.twilioapp.models import TwilioPhoneCall
 from common.api_helpers.utils import create_engine_url
-from settings.base import PHONE_CALL_INSTRUCTIONS_CONFIG, PHONE_CALL_INSTRUCTIONS_TEMPLATE
+from settings.base import PHONE_CALL_ACTION_RESPONSE_TEMPLATE, PHONE_CALL_INSTRUCTIONS_CONFIG, PHONE_CALL_INSTRUCTIONS_TEMPLATE
 
 logger = logging.getLogger(__name__)
 DEFAULT_SILENCE_DELAY_SECONDS = 1800
 DEFAULT_WAIT_TIME_FOR_USER_ACTION = 5
 DEFAULT_ACTION_SUCCESS_MESSAGES = {
-    "acknowledge": "The alert is Acknowledged",
-    "resolve": "The alert is marked Resolved",
-    "silence": "The alert is Silenced",
+    "acknowledge": PHONE_CALL_ACTION_RESPONSE_TEMPLATE.get("acknowledge_success_message", "The alert is Acknowledged"),
+    "resolve": PHONE_CALL_ACTION_RESPONSE_TEMPLATE.get("resolve_success_message", "The alert is marked Resolved"),
+    "silence": PHONE_CALL_ACTION_RESPONSE_TEMPLATE.get("silence_success_message", "The alert is Silenced"),
 }
+ACKNOWLEDGE_SKIPPED_RESOLVED_MESSAGE = PHONE_CALL_ACTION_RESPONSE_TEMPLATE.get(
+    "acknowledge_skipped_resolved_message",
+    "This alert group couldn't be acknowledged because it was marked resolved recently",
+)
+ACKNOWLEDGE_BUNDLE_SKIPPED_RESOLVED_MESSAGE = PHONE_CALL_ACTION_RESPONSE_TEMPLATE.get(
+    "acknowledge_bundle_skipped_resolved_message",
+    "Some alert groups couldn't be acknowledged because they were marked resolved recently",
+)
+ACKNOWLEDGE_BUNDLE_ALL_RESOLVED_MESSAGE = PHONE_CALL_ACTION_RESPONSE_TEMPLATE.get(
+    "acknowledge_bundle_all_resolved_message",
+    "These alert groups couldn't be acknowledged because they were marked resolved recently",
+)
 ACTION_SUCCESS_MESSAGE_CONFIG_KEYS = {
     "acknowledge": "acknowledge_message",
     "resolve": "resolve_message",
@@ -163,9 +175,21 @@ def process_gather_data(call_sid: str, digit: str) -> VoiceResponse:
 
     success_message = _get_action_success_message(action)
     if success_message is not None:
-        # Success case
-        response.say(success_message)
-        process_digit(call_sid, action)
+        if action == "acknowledge":
+            result = process_digit(call_sid, action)
+            if result is not None and result.get("acknowledged_count", 0) == 0 and result.get("skipped_resolved", 0) > 0:
+                if result.get("is_bundle"):
+                    response.say(ACKNOWLEDGE_BUNDLE_ALL_RESOLVED_MESSAGE)
+                else:
+                    response.say(ACKNOWLEDGE_SKIPPED_RESOLVED_MESSAGE)
+            elif result is not None and result.get("acknowledged_count", 0) > 0 and result.get("skipped_resolved", 0) > 0:
+                response.say(f"{success_message}. {ACKNOWLEDGE_BUNDLE_SKIPPED_RESOLVED_MESSAGE}")
+            else:
+                response.say(success_message)
+        else:
+            # Success case
+            response.say(success_message)
+            process_digit(call_sid, action)
     else:
         if action == "repeat":
             # Repeat current alert group message
@@ -242,14 +266,14 @@ def process_digit(call_sid, action):
         twilio_phone_call = TwilioPhoneCall.objects.filter(sid=call_sid).first()
         if twilio_phone_call is None:
             logger.info(f"twilioapp.process_digit: twilio_phone_call not found sid={call_sid}")
-            return
+            return None
 
         logger.info(f"twilioapp.process_digit: found twilio_phone_call sid={call_sid} action={action}")
         phone_call_record = twilio_phone_call.phone_call_record
 
         if phone_call_record is None:
             logger.info(f"twilioapp.process_digit: twilio_phone_call has no phone_call_record sid={call_sid}")
-            return
+            return None
 
         logger.info(f"twilioapp.process_digit: found phone_call_record id={phone_call_record.id} sid={call_sid}")
         user = phone_call_record.receiver
@@ -266,15 +290,28 @@ def process_digit(call_sid, action):
                 f"twilio_phone_call_sid={call_sid} action={action} bundle_uuid={phone_call_record.represents_bundle_uuid} "
                 f"user_id={user.id} alert_group_count={len(alert_groups)}"
             )
+            acknowledged_count = 0
+            skipped_resolved = 0
             for alert_group in alert_groups:
                 if action == "acknowledge":
+                    if alert_group.resolved:
+                        skipped_resolved += 1
+                        continue
                     alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+                    acknowledged_count += 1
                 elif action == "resolve":
                     alert_group.resolve_by_user_or_backsync(user, action_source=ActionSource.PHONE)
                 elif action == "silence":
                     alert_group.silence_by_user_or_backsync(
                         user, silence_delay=get_phone_call_silence_in_minutes() * 60, action_source=ActionSource.PHONE
                     )
+            if action == "acknowledge":
+                return {
+                    "is_bundle": True,
+                    "acknowledged_count": acknowledged_count,
+                    "skipped_resolved": skipped_resolved,
+                    "total": len(alert_groups),
+                }
         else:
             alert_group = phone_call_record.represents_alert_group
             logger.info(
@@ -282,13 +319,17 @@ def process_digit(call_sid, action):
                 f"twilio_phone_call_sid={call_sid} action={action} alert_group_id={alert_group.id} user_id={user.id}"
             )
             if action == "acknowledge":
+                if alert_group.resolved:
+                    return {"is_bundle": False, "acknowledged_count": 0, "skipped_resolved": 1, "total": 1}
                 alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+                return {"is_bundle": False, "acknowledged_count": 1, "skipped_resolved": 0, "total": 1}
             elif action == "resolve":
                 alert_group.resolve_by_user_or_backsync(user, action_source=ActionSource.PHONE)
             elif action == "silence":
                 alert_group.silence_by_user_or_backsync(
                     user, silence_delay=get_phone_call_silence_in_minutes() * 60, action_source=ActionSource.PHONE
                 )
+    return None
 
 
 def get_gather_url():

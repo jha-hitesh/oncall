@@ -1,4 +1,5 @@
 from common.utils import (
+    parse_phone_call_action_response_template,
     parse_phone_call_instructions_config,
     validate_alert_group_phone_call_template,
     validate_notification_bundle_phonecall_template,
@@ -53,3 +54,26 @@ def test_parse_phone_call_instructions_config_rejects_duplicate_buttons():
 
     assert config is None
     assert error == "Invalid value for button configuration: 1 is used by acknowledge_button, resolve_button"
+
+
+def test_parse_phone_call_action_response_template_rejects_invalid_json():
+    template, error = parse_phone_call_action_response_template('{"acknowledge_skipped_resolved_message": }')
+
+    assert template is None
+    assert error == "Invalid JSON: Expecting value"
+
+
+def test_parse_phone_call_action_response_template_rejects_unknown_keys():
+    template, error = parse_phone_call_action_response_template({"unknown_key": "x"})
+
+    assert template is None
+    assert "Invalid key unknown_key:" in error
+
+
+def test_parse_phone_call_action_response_template_accepts_valid_partial_config():
+    template, error = parse_phone_call_action_response_template(
+        {"acknowledge_skipped_resolved_message": "Resolved already"}
+    )
+
+    assert error is None
+    assert template == {"acknowledge_skipped_resolved_message": "Resolved already"}

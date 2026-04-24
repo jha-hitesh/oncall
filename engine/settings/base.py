@@ -15,10 +15,12 @@ from common.utils import (
     getenv_float,
     getenv_integer,
     getenv_list,
+    parse_phone_call_action_response_template,
     parse_phone_call_instructions_config,
     validate_alert_group_phone_call_template,
     validate_notification_bundle_phonecall_template,
     validate_notification_bundle_sms_template,
+    validate_phone_call_action_response_template,
     validate_phone_call_instructions_template,
 )
 
@@ -1144,3 +1146,35 @@ if phone_call_instructions_template_error is not None:
         "Invalid PHONE_CALL_INSTRUCTIONS_TEMPLATE env variable: "
         f"{phone_call_instructions_template_error}"
     )
+
+phone_call_action_response_template_default = {
+    "acknowledge_success_message": "The alert is Acknowledged",
+    "resolve_success_message": "The alert is marked Resolved",
+    "silence_success_message": "The alert is Silenced",
+    "acknowledge_skipped_resolved_message": (
+        "This alert group couldn't be acknowledged because it was marked resolved recently"
+    ),
+    "acknowledge_bundle_skipped_resolved_message": (
+        "Some alert groups couldn't be acknowledged because they were marked resolved recently"
+    ),
+    "acknowledge_bundle_all_resolved_message": (
+        "These alert groups couldn't be acknowledged because they were marked resolved recently"
+    ),
+}
+phone_call_action_response_template_raw = os.getenv(
+    "PHONE_CALL_ACTION_RESPONSE_TEMPLATE",
+    json.dumps(phone_call_action_response_template_default),
+)
+PHONE_CALL_ACTION_RESPONSE_TEMPLATE, phone_call_action_response_template_error = parse_phone_call_action_response_template(
+    phone_call_action_response_template_raw
+)
+if phone_call_action_response_template_error is not None:
+    raise ValueError(
+        "Invalid PHONE_CALL_ACTION_RESPONSE_TEMPLATE env variable: "
+        f"{phone_call_action_response_template_error}"
+    )
+
+PHONE_CALL_ACTION_RESPONSE_TEMPLATE = {
+    **phone_call_action_response_template_default,
+    **(PHONE_CALL_ACTION_RESPONSE_TEMPLATE or {}),
+}

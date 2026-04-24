@@ -76,7 +76,14 @@ def update_zvonok_call_status(call_id: str, call_status: str, user_choice: Optio
             if user_choice and user_choice == live_settings.ZVONOK_POSTBACK_USER_CHOICE_ACK:
                 user = phone_call_record.receiver
                 for notification in notifications.select_related("alert_group"):
-                    notification.alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
+                    alert_group = notification.alert_group
+                    if alert_group.resolved:
+                        logger.info(
+                            "zvonok.update_zvonok_call_status: skip acknowledge for resolved alert_group "
+                            f"call_id={call_id} alert_group_id={alert_group.id} user_id={user.id}"
+                        )
+                        continue
+                    alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
         else:
             log_record = UserNotificationPolicyLogRecord(
                 type=log_record_type,
@@ -104,4 +111,10 @@ def update_zvonok_call_status(call_id: str, call_status: str, user_choice: Optio
                     f"alert_group_id={alert_group.id} user_id={user.id}"
                 )
 
+                if alert_group.resolved:
+                    logger.info(
+                        "zvonok.update_zvonok_call_status: skip acknowledge for resolved alert_group "
+                        f"call_id={call_id} alert_group_id={alert_group.id} user_id={user.id}"
+                    )
+                    return
                 alert_group.acknowledge_by_user_or_backsync(user, action_source=ActionSource.PHONE)
