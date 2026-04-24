@@ -93,3 +93,16 @@ def test_live_setting_validator_rejects_invalid_phone_call_instructions_template
         "Invalid template variable: invalid_key. "
         "Allowed variables are: acknowledge_button, repeat_button, resolve_button, silence_button, silence_in_minutes"
     )
+
+
+def test_live_setting_validator_rejects_invalid_notification_bundle_sms_template():
+    live_setting = type(
+        "LiveSettingStub",
+        (),
+        {"name": "NOTIFICATION_BUNDLE_SMS_TEMPLATE", "value": "{{ foo }}"},
+    )()
+
+    assert LiveSettingValidator(live_setting).get_error() == (
+        "Invalid template variable: foo. "
+        "Allowed variables are: alert_group_codes, alert_group_names, channel_names, stack_slug, total_alert_groups, total_channels"
+    )

@@ -18,6 +18,7 @@ from common.utils import (
     parse_phone_call_instructions_config,
     validate_alert_group_phone_call_template,
     validate_notification_bundle_phonecall_template,
+    validate_notification_bundle_sms_template,
     validate_phone_call_instructions_template,
 )
 
@@ -1088,6 +1089,12 @@ NOTIFICATION_BUNDLE_SMS_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_SMS_TEMPLATE")
     "integration{% if total_channels != 1 %}s{% endif %}: {{ channel_names[:1] | join(', ') }}"
     "{% if total_channels > 1 %} and {{ total_channels - 1 }} more{% endif %}."
 )
+notification_bundle_sms_template_error = validate_notification_bundle_sms_template(NOTIFICATION_BUNDLE_SMS_TEMPLATE)
+if notification_bundle_sms_template_error is not None:
+    raise ValueError(
+        "Invalid NOTIFICATION_BUNDLE_SMS_TEMPLATE env variable: "
+        f"{notification_bundle_sms_template_error}"
+    )
 
 NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE") or (
     "{% if total_alert_groups == 0 %}Grafana OnCall. Multiple alert groups require your attention."

@@ -55,6 +55,8 @@ NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT = {
     "alert_group_codes": ["#1", "#2"],
     "stack_slug": "test-stack",
 }
+# NOTE: bundled SMS and bundled phone-call templates share the same rendering context.
+NOTIFICATION_BUNDLE_SMS_TEMPLATE_SAMPLE_CONTEXT = dict(NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT)
 SETTINGS_JINJA_TEMPLATE_ENV = SandboxedEnvironment()
 
 
@@ -364,6 +366,14 @@ def validate_notification_bundle_phonecall_template(template: str) -> str | None
         template,
         allowed_variables=set(NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT),
         sample_context=NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT,
+    )
+
+
+def validate_notification_bundle_sms_template(template: str) -> str | None:
+    return validate_jinja_template(
+        template,
+        allowed_variables=set(NOTIFICATION_BUNDLE_SMS_TEMPLATE_SAMPLE_CONTEXT),
+        sample_context=NOTIFICATION_BUNDLE_SMS_TEMPLATE_SAMPLE_CONTEXT,
     )
 
 
