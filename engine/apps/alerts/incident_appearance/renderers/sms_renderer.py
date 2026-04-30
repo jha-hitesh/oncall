@@ -1,5 +1,3 @@
-from django.conf import settings
-
 from apps.alerts.incident_appearance.renderers.base_renderer import (
     AlertBaseRenderer,
     AlertGroupBaseRenderer,
@@ -7,6 +5,7 @@ from apps.alerts.incident_appearance.renderers.base_renderer import (
 )
 from apps.alerts.incident_appearance.renderers.constants import DEFAULT_BACKUP_TITLE
 from apps.alerts.incident_appearance.templaters import AlertSmsTemplater
+from apps.base.utils import live_settings
 from common.jinja_templater.apply_jinja_template import apply_jinja_template
 from common.utils import str_or_backup
 
@@ -36,4 +35,4 @@ class AlertGroupSmsRenderer(AlertGroupBaseRenderer):
 class AlertGroupSMSBundleRenderer(AlertGroupBundleBaseRenderer):
     def render(self) -> str:
         context = self.get_bundle_template_context()
-        return apply_jinja_template(settings.NOTIFICATION_BUNDLE_SMS_TEMPLATE, **context)
+        return apply_jinja_template(live_settings.NOTIFICATION_BUNDLE_SMS_TEMPLATE, **context)
