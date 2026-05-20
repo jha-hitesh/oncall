@@ -63,20 +63,40 @@ def update_twilio_call_status(call_sid, call_status):
             log_record_type = UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_FAILED
             log_record_error_code = get_error_code_by_twilio_status(status_code)
         if log_record_type is not None:
-            log_record = UserNotificationPolicyLogRecord(
-                type=log_record_type,
-                notification_error_code=log_record_error_code,
-                author=phone_call_record.receiver,
-                notification_policy=phone_call_record.notification_policy,
-                alert_group=phone_call_record.represents_alert_group,
-                notification_step=UserNotificationPolicy.Step.NOTIFY,
-                notification_channel=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
-            )
-            log_record.save()
-            logger.info(
-                f"twilioapp.update_twilio_call_status: created log_record log_record_id={log_record.id} "
-                f"type={log_record_type}"
-            )
+            if phone_call_record.represents_bundle_uuid:
+                notifications = BundledNotification.objects.filter(bundle_uuid=phone_call_record.represents_bundle_uuid)
+                log_records_to_create = []
+                for notification in notifications:
+                    log_record = UserNotificationPolicyLogRecord(
+                        type=log_record_type,
+                        notification_error_code=log_record_error_code,
+                        author=phone_call_record.receiver,
+                        notification_policy=notification.notification_policy,
+                        alert_group=notification.alert_group,
+                        notification_step=UserNotificationPolicy.Step.NOTIFY,
+                        notification_channel=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+                    )
+                    log_records_to_create.append(log_record)
+                UserNotificationPolicyLogRecord.objects.bulk_create(log_records_to_create, batch_size=5000)
+                logger.info(
+                    f"twilioapp.update_twilio_call_status: created log_records for phone call bundle "
+                    f"{phone_call_record.represents_bundle_uuid} type={log_record_type}"
+                )
+            else:
+                log_record = UserNotificationPolicyLogRecord(
+                    type=log_record_type,
+                    notification_error_code=log_record_error_code,
+                    author=phone_call_record.receiver,
+                    notification_policy=phone_call_record.notification_policy,
+                    alert_group=phone_call_record.represents_alert_group,
+                    notification_step=UserNotificationPolicy.Step.NOTIFY,
+                    notification_channel=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+                )
+                log_record.save()
+                logger.info(
+                    f"twilioapp.update_twilio_call_status: created log_record log_record_id={log_record.id} "
+                    f"type={log_record_type}"
+                )
 
 
 def get_error_code_by_twilio_status(status):

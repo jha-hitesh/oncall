@@ -37,8 +37,26 @@ class AlertGroupBaseRenderer(ABC):
 
 
 class AlertGroupBundleBaseRenderer:
-    MAX_ALERT_GROUPS_TO_RENDER = 3
-    MAX_CHANNELS_TO_RENDER = 1
-
     def __init__(self, notifications: "QuerySet[BundledNotification]"):
         self.notifications = notifications
+
+    def get_bundle_template_context(self) -> dict[str, typing.Any]:
+        alert_groups = []
+        channels = []
+
+        for notification in self.notifications:
+            if notification.alert_group not in alert_groups:
+                alert_groups.append(notification.alert_group)
+            if notification.alert_receive_channel not in channels:
+                channels.append(notification.alert_receive_channel)
+
+        stack_slug = channels[0].organization.stack_slug if channels else ""
+
+        return {
+            "total_alert_groups": len(alert_groups),
+            "total_channels": len(channels),
+            "channel_names": [channel.short_name for channel in channels],
+            "alert_group_names": [alert_group.web_title_cache or "" for alert_group in alert_groups],
+            "alert_group_codes": [f"#{alert_group.inside_organization_number}" for alert_group in alert_groups],
+            "stack_slug": stack_slug,
+        }

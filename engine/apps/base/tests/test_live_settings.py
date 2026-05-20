@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from apps.base.models import LiveSetting
-from apps.base.utils import live_settings
+from apps.base.utils import LiveSettingValidator, live_settings
 from apps.twilioapp.phone_provider import TwilioPhoneProvider
 
 
@@ -70,3 +70,39 @@ def test_twilio_respects_changed_credentials(settings):
     assert twilio_client._default_twilio_api_client.username == "new_twilio_account_sid"
     assert twilio_client._default_twilio_api_client.password == "new_twilio_auth_token"
     assert twilio_client._default_twilio_number == "new_twilio_number"
+
+
+def test_live_setting_validator_rejects_invalid_phone_call_instructions_config_json():
+    live_setting = type(
+        "LiveSettingStub",
+        (),
+        {"name": "PHONE_CALL_INSTRUCTIONS_CONFIG", "value": '{"acknowledge_button": }'},
+    )()
+
+    assert LiveSettingValidator(live_setting).get_error() == "Invalid JSON: Expecting value"
+
+
+def test_live_setting_validator_rejects_invalid_phone_call_instructions_template():
+    live_setting = type(
+        "LiveSettingStub",
+        (),
+        {"name": "PHONE_CALL_INSTRUCTIONS_TEMPLATE", "value": "Press {invalid_key}"},
+    )()
+
+    assert LiveSettingValidator(live_setting).get_error() == (
+        "Invalid template variable: invalid_key. "
+        "Allowed variables are: acknowledge_button, repeat_button, resolve_button, silence_button, silence_in_minutes"
+    )
+
+
+def test_live_setting_validator_rejects_invalid_notification_bundle_sms_template():
+    live_setting = type(
+        "LiveSettingStub",
+        (),
+        {"name": "NOTIFICATION_BUNDLE_SMS_TEMPLATE", "value": "{{ foo }}"},
+    )()
+
+    assert LiveSettingValidator(live_setting).get_error() == (
+        "Invalid template variable: foo. "
+        "Allowed variables are: alert_group_codes, alert_group_names, channel_names, stack_slug, total_alert_groups, total_channels"
+    )

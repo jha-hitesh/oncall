@@ -121,6 +121,8 @@ class UserNotificationPolicyLogRecord(models.Model):
         ERROR_NOTIFICATION_PHONE_NUMBER_IS_NOT_VERIFIED,
     ]
 
+    REASON_BUNDLED_NOTIFICATION = "bundled notification"
+
     type = models.IntegerField(choices=TYPE_CHOICES)
     author = models.ForeignKey(
         "user_management.User",
@@ -347,9 +349,15 @@ class UserNotificationPolicyLogRecord(models.Model):
                 if notification_channel == UserNotificationPolicy.NotificationChannel.SLACK:
                     result += f"invited {user_verbal} in Slack"
                 elif notification_channel == UserNotificationPolicy.NotificationChannel.SMS:
-                    result += f"sent sms to {user_verbal}"
+                    if self.reason == self.REASON_BUNDLED_NOTIFICATION:
+                        result += f"sent sms to {user_verbal} using bundled notification"
+                    else:
+                        result += f"sent sms to {user_verbal}"
                 elif notification_channel == UserNotificationPolicy.NotificationChannel.PHONE_CALL:
-                    result += f"called {user_verbal} by phone"
+                    if self.reason == self.REASON_BUNDLED_NOTIFICATION:
+                        result += f"called {user_verbal} by phone using bundled notification"
+                    else:
+                        result += f"called {user_verbal} by phone"
                 elif notification_channel == UserNotificationPolicy.NotificationChannel.TELEGRAM:
                     result += f"sent telegram message to {user_verbal}"
                 elif notification_channel is None:

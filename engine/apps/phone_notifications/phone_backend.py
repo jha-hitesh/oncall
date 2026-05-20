@@ -4,7 +4,10 @@ from typing import Optional, Tuple
 import requests
 from django.conf import settings
 
-from apps.alerts.incident_appearance.renderers.phone_call_renderer import AlertGroupPhoneCallRenderer
+from apps.alerts.incident_appearance.renderers.phone_call_renderer import (
+    AlertGroupPhoneCallBundleRenderer,
+    AlertGroupPhoneCallRenderer,
+)
 from apps.alerts.incident_appearance.renderers.sms_renderer import AlertGroupSMSBundleRenderer, AlertGroupSmsRenderer
 from apps.alerts.signals import user_notification_action_triggered_signal
 from apps.base.utils import live_settings
@@ -41,6 +44,19 @@ def notify_by_sms_bundle_async_task(user_id, bundle_uuid):
     phone_backend.notify_by_sms_bundle(user, bundle_uuid)
 
 
+@shared_dedicated_queue_retry_task(
+    autoretry_for=(Exception,), retry_backoff=True, max_retries=0 if settings.DEBUG else None
+)
+def notify_by_call_bundle_async_task(user_id, bundle_uuid):
+    from apps.user_management.models import User
+
+    user = User.objects.filter(id=user_id).first()
+    if not user:
+        return
+    phone_backend = PhoneBackend()
+    phone_backend.notify_by_call_bundle(user, bundle_uuid)
+
+
 class PhoneBackend:
     def __init__(self):
         self.phone_provider: PhoneProvider = self._get_phone_provider()
@@ -61,33 +77,12 @@ class PhoneBackend:
         renderer = AlertGroupPhoneCallRenderer(alert_group)
         message = renderer.render()
 
-        record = PhoneCallRecord(
-            represents_alert_group=alert_group,
-            receiver=user,
+        _, log_record_error_code = self._make_call(
+            user=user,
+            alert_group=alert_group,
             notification_policy=notification_policy,
-            exceeded_limit=False,
+            message=message,
         )
-
-        try:
-            if live_settings.GRAFANA_CLOUD_NOTIFICATIONS_ENABLED and settings.IS_OPEN_SOURCE:
-                self._notify_by_cloud_call(user, message)
-                record.save()
-            else:
-                provider_call = self._notify_by_provider_call(user, message)
-                # it is important that record is saved here, so it is possible to execute link_and_save
-                record.save()
-                if provider_call:
-                    provider_call.link_and_save(record)
-        except FailedToMakeCall:
-            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_NOT_ABLE_TO_CALL
-        except ProviderNotSupports:
-            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_NOT_ABLE_TO_CALL
-        except CallsLimitExceeded:
-            record.exceeded_limit = True
-            record.save()
-            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_PHONE_CALLS_LIMIT_EXCEEDED
-        except NumberNotVerified:
-            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_PHONE_NUMBER_IS_NOT_VERIFIED
 
         if log_record_error_code is not None:
             log_record = UserNotificationPolicyLogRecord(
@@ -102,6 +97,53 @@ class PhoneBackend:
             log_record.save()
             user_notification_action_triggered_signal.send(sender=PhoneBackend.notify_by_call, log_record=log_record)
 
+    @staticmethod
+    def notify_by_call_bundle_async(user, bundle_uuid):
+        notify_by_call_bundle_async_task.apply_async((user.id, bundle_uuid))
+
+    def notify_by_call_bundle(self, user, bundle_uuid):
+        from apps.alerts.models import BundledNotification
+        from apps.base.models import UserNotificationPolicy, UserNotificationPolicyLogRecord
+
+        notifications = BundledNotification.objects.filter(bundle_uuid=bundle_uuid).select_related("alert_group")
+
+        if not notifications:
+            logger.info("Phone call notification bundle is empty, related alert groups might have been deleted")
+            return
+
+        representative_notification = notifications.first()
+        message = AlertGroupPhoneCallBundleRenderer(notifications).render()
+        _, log_record_error_code = self._make_call(
+            user=user,
+            alert_group=representative_notification.alert_group,
+            notification_policy=representative_notification.notification_policy,
+            message=message,
+            bundle_uuid=bundle_uuid,
+        )
+
+        if log_record_error_code is not None:
+            log_records_to_create = []
+            for notification in notifications:
+                log_record = UserNotificationPolicyLogRecord(
+                    author=user,
+                    type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_FAILED,
+                    notification_policy=notification.notification_policy,
+                    alert_group=notification.alert_group,
+                    notification_error_code=log_record_error_code,
+                    notification_step=UserNotificationPolicy.Step.NOTIFY,
+                    notification_channel=UserNotificationPolicy.NotificationChannel.PHONE_CALL,
+                )
+                log_records_to_create.append(log_record)
+            if log_records_to_create:
+                if log_record_error_code in UserNotificationPolicyLogRecord.ERRORS_TO_SEND_IN_SLACK_CHANNEL:
+                    log_record = log_records_to_create.pop()
+                    log_record.save()
+                    user_notification_action_triggered_signal.send(
+                        sender=PhoneBackend.notify_by_call_bundle, log_record=log_record
+                    )
+
+                UserNotificationPolicyLogRecord.objects.bulk_create(log_records_to_create, batch_size=5000)
+
     def _notify_by_provider_call(self, user, message) -> Optional[ProviderPhoneCall]:
         """
         _notify_by_provider_call makes a notification call using configured phone provider.
@@ -115,6 +157,42 @@ class PhoneBackend:
         elif calls_left < 3:
             message = self._add_call_limit_warning(calls_left, message)
         return self.phone_provider.make_notification_call(user.verified_phone_number, message)
+
+    def _make_call(
+        self, user, message, alert_group=None, notification_policy=None, bundle_uuid=None
+    ) -> Tuple[bool, Optional[int]]:
+        from apps.base.models import UserNotificationPolicyLogRecord
+
+        log_record_error_code = None
+        record = PhoneCallRecord(
+            represents_alert_group=alert_group,
+            represents_bundle_uuid=bundle_uuid,
+            receiver=user,
+            notification_policy=notification_policy,
+            exceeded_limit=False,
+        )
+
+        try:
+            if live_settings.GRAFANA_CLOUD_NOTIFICATIONS_ENABLED and settings.IS_OPEN_SOURCE:
+                self._notify_by_cloud_call(user, message)
+                record.save()
+            else:
+                provider_call = self._notify_by_provider_call(user, message)
+                record.save()
+                if provider_call:
+                    provider_call.link_and_save(record)
+        except FailedToMakeCall:
+            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_NOT_ABLE_TO_CALL
+        except ProviderNotSupports:
+            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_NOT_ABLE_TO_CALL
+        except CallsLimitExceeded:
+            record.exceeded_limit = True
+            record.save()
+            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_PHONE_CALLS_LIMIT_EXCEEDED
+        except NumberNotVerified:
+            log_record_error_code = UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_PHONE_NUMBER_IS_NOT_VERIFIED
+
+        return log_record_error_code is None, log_record_error_code
 
     def _notify_by_cloud_call(self, user, message):
         """
