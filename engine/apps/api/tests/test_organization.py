@@ -2,6 +2,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.response import Response
@@ -9,6 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.api.permissions import LegacyAccessControlRole
 from apps.api.serializers.organization import CurrentOrganizationSerializer
+from apps.google.client import GoogleCalendarRefreshError
 
 mock_banner = {"title": None, "body": None}
 mock_env_status = {
@@ -49,11 +51,44 @@ def test_get_organization(
         "rbac_enabled": organization.is_rbac_permissions_enabled,
         "grafana_incident_enabled": organization.is_grafana_incident_enabled,
         "grafana_irm_enabled": organization.is_grafana_irm_enabled,
+        "schedule_management_require_admin": False,
         "direct_paging_prefer_important_policy": organization.direct_paging_prefer_important_policy,
         "is_resolution_note_required": False,
         "env_status": mock_env_status,
         "banner": mock_banner,
+        "has_google_oauth2_organization_connected": False,
+        "google_oauth2_organization_email": None,
     }
+
+
+@patch.object(CurrentOrganizationSerializer, "get_banner", return_value=mock_banner)
+@patch.object(CurrentOrganizationSerializer, "get_env_status", return_value=mock_env_status)
+@pytest.mark.django_db
+def test_get_organization_with_google_calendar_connection(
+    _mocked_banner,
+    _mocked_env_status,
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin@example.com",
+        },
+        connected_by=user,
+    )
+
+    client = APIClient()
+    url = reverse("api-internal:api-organization")
+    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["has_google_oauth2_organization_connected"] is True
+    assert response.json()["google_oauth2_organization_email"] == "admin@example.com"
 
 
 @pytest.mark.django_db
@@ -97,6 +132,22 @@ def test_get_organization_grafana_irm_enabled(
 
 
 @pytest.mark.django_db
+@override_settings(SCHEDULE_MANAGEMENT_REQUIRE_ADMIN=True)
+def test_get_organization_schedule_management_require_admin(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+):
+    _, user, token = make_organization_and_user_with_plugin_token()
+
+    client = APIClient()
+    url = reverse("api-internal:api-organization")
+
+    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["schedule_management_require_admin"] is True
+
+
+@pytest.mark.django_db
 def test_update_organization_settings(make_organization_and_user_with_plugin_token, make_user_auth_headers):
     organization, user, token = make_organization_and_user_with_plugin_token()
 
@@ -114,6 +165,94 @@ def test_update_organization_settings(make_organization_and_user_with_plugin_tok
     organization.refresh_from_db()
     assert organization.is_resolution_note_required is True
     assert organization.direct_paging_prefer_important_policy is True
+
+
+@pytest.mark.django_db
+@patch("apps.api.views.google_calendar.GoogleCalendarAPIClient.create_event")
+def test_create_organization_google_calendar_event(
+    mock_create_event,
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin@example.com",
+        },
+        connected_by=user,
+    )
+
+    mock_create_event.return_value = {
+        "id": "event-1",
+        "htmlLink": "https://calendar.google.com/event",
+        "hangoutLink": "https://meet.google.com/abc-defg-hij",
+    }
+
+    client = APIClient()
+    url = reverse("api-internal:api-organization-google-calendar-events")
+    response = client.post(
+        url,
+        {
+            "summary": "INC-1234 War Room",
+            "description": "Incident bridge for INC-1234",
+            "start": "2026-03-12T16:00:00+05:30",
+            "end": "2026-03-12T17:00:00+05:30",
+            "attendees": ["a@company.com", "b@company.com"],
+        },
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.json() == {
+        "id": "event-1",
+        "html_link": "https://calendar.google.com/event",
+        "hangout_link": "https://meet.google.com/abc-defg-hij",
+    }
+
+
+@pytest.mark.django_db
+@patch("apps.api.views.google_calendar.GoogleCalendarAPIClient.create_event")
+def test_create_organization_google_calendar_event_refresh_error_disconnects_org(
+    mock_create_event,
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+        },
+        connected_by=user,
+    )
+
+    mock_create_event.side_effect = GoogleCalendarRefreshError(Exception("expired"))
+
+    client = APIClient()
+    url = reverse("api-internal:api-organization-google-calendar-events")
+    response = client.post(
+        url,
+        {
+            "summary": "INC-1234 War Room",
+            "start": "2026-03-12T16:00:00+05:30",
+            "end": "2026-03-12T17:00:00+05:30",
+        },
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+
+    organization.refresh_from_db()
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["detail"] == "Google Calendar connection expired. Reconnect Google Calendar."
+    assert organization.has_google_oauth2_organization_connected is False
 
 
 @pytest.mark.django_db

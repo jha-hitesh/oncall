@@ -32,6 +32,11 @@ refs:
       destination: /docs/oncall/<ONCALL_VERSION>/configure/integrations/outgoing-webhooks/
     - pattern: /docs/grafana-cloud/
       destination: /docs/grafana-cloud/alerting-and-irm/oncall/configure/integrations/outgoing-webhooks/
+  get-started:
+    - pattern: /docs/oncall/
+      destination: /docs/oncall/<ONCALL_VERSION>/set-up/get-started/
+    - pattern: /docs/grafana-cloud/
+      destination: /docs/grafana-cloud/alerting-and-irm/oncall/set-up/get-started/
 ---
 
 # Escalation Chains and Routes
@@ -123,6 +128,24 @@ Changes to the escalation chain impact all associated integrations and routes.
 - `Declare incident (non-default routes)`: **Available only in Grafana Cloud**. Declares an incident with a specified severity.
 Limited to one incident per route at a time.
 Additional alerts are grouped into the active incident, and up to five are listed as incident context.
+- `Create calendar invite`: Creates a Google Calendar event for responders selected from the current on-call users,
+the current escalation chain members, or the current team members.
+
+### Calendar invite escalation step
+
+The `Create calendar invite` step is available when Google Calendar support is enabled and your organization has connected
+an organization-level Google account in **Settings > Google Calendar**.
+
+This step can:
+
+- create a Google Calendar event during escalation
+- optionally generate a Google Meet link when the event template includes conferencing details
+- add the resulting event link or Meet link to the alert group timeline and Slack thread when available
+
+If the organization is not connected to Google Calendar, or if no recipients match the selected invitee source,
+the step is skipped and the reason is recorded in the alert group timeline.
+
+For setup guidance, refer to [Get started](ref:get-started).
 
 {{< admonition type="note" >}}
 The **Notify Slack channel members** and **Notify Slack user group** steps are designed to notify OnCall-registered users via their configured notification rules.

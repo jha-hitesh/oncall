@@ -214,6 +214,16 @@ class AlertGroupSlackRepresentative(AlertGroupAbstractRepresentative):
         step = UnAttachGroupStep(self.log_record.alert_group.channel.organization.slack_team_identity)
         step.process_signal(self.log_record)
 
+    def on_custom_webhook_triggered(self):
+        CustomWebhookTriggeredStep = ScenarioStep.get_step("distribute_alerts", "CustomWebhookTriggeredStep")
+        step = CustomWebhookTriggeredStep(self.log_record.alert_group.channel.organization.slack_team_identity)
+        step.process_signal(self.log_record)
+
+    def on_escalation_finished(self):
+        CalendarInviteFinishedStep = ScenarioStep.get_step("distribute_alerts", "CalendarInviteFinishedStep")
+        step = CalendarInviteFinishedStep(self.log_record.alert_group.channel.organization.slack_team_identity)
+        step.process_signal(self.log_record)
+
     def on_silence(self):
         SilenceGroupStep = ScenarioStep.get_step("distribute_alerts", "SilenceGroupStep")
         step = SilenceGroupStep(self.log_record.alert_group.channel.organization.slack_team_identity)

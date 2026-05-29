@@ -216,6 +216,27 @@ Toggle to send the entire webhook payload instead of using the values in the **D
 | :------: | :----------------------------------------------: | :-----------: |
 |    ❌    |                        ❌                        |    _False_    |
 
+#### Add response to timeline
+
+Creates an alert group timeline entry after the webhook request completes.
+The timeline entry can use either the raw response body or a rendered response template.
+
+| Required | [Template Accepted](#outgoing-webhook-templates) | Default Value |
+| :------: | :----------------------------------------------: | :-----------: |
+|    ❌    |                        ❌                        |    _False_    |
+
+#### Response Template
+
+Optional Jinja2 template used to render the webhook response for the alert group timeline.
+If left empty, Grafana OnCall stores the original response body. If the template fails to render, the raw response body is used.
+
+The template receives the same event context as the webhook itself, plus `webhook_response`, which contains the parsed
+response body when the response is valid JSON, or the raw response string otherwise.
+
+| Required | [Template Accepted](#outgoing-webhook-templates) | Default Value |
+| :------: | :----------------------------------------------: | :-----------: |
+|    ❌    |                        ✔️                        |    _Empty_    |
+
 ## Outgoing webhook templates
 
 The fields that accept a Jinja2 template in outgoing webhooks are able to process data to customize the output.
@@ -304,6 +325,10 @@ must match the structure of how the fields are nested in the data.
     "id": "WH9NSKXWPXSNY3",
     "name": "Demo Webhook",
     "labels": {}
+  },
+  "webhook_response": {
+    "message": "Ticket created!",
+    "region": "eu"
   }
 }
 ```
@@ -412,6 +437,14 @@ Triggered webhook details
 - `{{ webhook.name }}` - Name of webhook
 - `{{ webhook.labels }}` - Webhook labels
 
+#### `webhook_response`
+
+Response body of the current webhook execution, available when rendering the **Response Template**.
+
+- If the response body is valid JSON, `webhook_response` is exposed as a parsed object
+- If the response body is plain text or invalid JSON, `webhook_response` is exposed as a string
+- If no response body is returned, `webhook_response` is `None`
+
 ### UID
 
 Templates often use UIDs to make decisions about what actions to take if you need to find the UID of an object
@@ -441,6 +474,18 @@ Here is an example using the user's email address as part of a URL:
 
 ```bash
 https://someticketsystem.com/new-ticket?assign-user={{ user.email }}
+```
+
+If **Add response to timeline** is enabled, you can render a compact timeline entry such as:
+
+```jinja2
+Ticket status: {{ webhook_response.status }} ({{ webhook_response.id }})
+```
+
+or, for plain text responses:
+
+```jinja2
+{{ webhook_response }}
 ```
 
 #### Note about JSON

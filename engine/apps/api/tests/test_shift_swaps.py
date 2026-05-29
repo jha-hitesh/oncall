@@ -3,6 +3,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -800,3 +801,44 @@ def test_take_permissions(
 
     response = client.post(url, format="json", **make_user_auth_headers(benefactor, token))
     assert response.status_code == expected_status
+
+
+@pytest.mark.django_db
+@override_settings(SCHEDULE_MANAGEMENT_REQUIRE_ADMIN=True)
+@pytest.mark.parametrize(
+    "route_name,method",
+    [
+        ("api-internal:shift_swap-list", "post"),
+        ("api-internal:shift_swap-detail", "put"),
+        ("api-internal:shift_swap-detail", "patch"),
+        ("api-internal:shift_swap-detail", "delete"),
+        ("api-internal:shift_swap-take", "post"),
+    ],
+)
+def test_shift_swap_write_permissions_ignore_schedule_management_admin_flag(
+    ssr_setup,
+    make_user_auth_headers,
+    route_name,
+    method,
+):
+    ssr, beneficiary, token, benefactor = ssr_setup(
+        beneficiary_role=LegacyAccessControlRole.EDITOR,
+        benefactor_role=LegacyAccessControlRole.EDITOR,
+    )
+    client = APIClient()
+
+    if route_name == "api-internal:shift_swap-list":
+        user = benefactor
+        url = reverse(route_name)
+        data = {}
+    elif route_name == "api-internal:shift_swap-take":
+        user = benefactor
+        url = reverse(route_name, kwargs={"pk": ssr.public_primary_key})
+        data = {}
+    else:
+        user = beneficiary
+        url = reverse(route_name, kwargs={"pk": ssr.public_primary_key})
+        data = {} if method == "delete" else {"description": "updated"}
+
+    response = getattr(client, method)(url, data, format="json", **make_user_auth_headers(user, token))
+    assert response.status_code != status.HTTP_403_FORBIDDEN

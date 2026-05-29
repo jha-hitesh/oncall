@@ -8,7 +8,21 @@ from celery.schedules import crontab
 from firebase_admin import credentials, initialize_app
 
 from common.api_helpers.custom_ratelimit import getenv_custom_ratelimit
-from common.utils import getenv_boolean, getenv_float, getenv_integer, getenv_list
+from common.utils import (
+    get_default_phone_call_instructions_template,
+    get_notification_channels_to_bundle,
+    getenv_boolean,
+    getenv_float,
+    getenv_integer,
+    getenv_list,
+    parse_phone_call_action_response_template,
+    parse_phone_call_instructions_config,
+    validate_alert_group_phone_call_template,
+    validate_notification_bundle_phonecall_template,
+    validate_notification_bundle_sms_template,
+    validate_phone_call_action_response_template,
+    validate_phone_call_instructions_template,
+)
 
 VERSION = "dev-oss"
 SEND_ANONYMOUS_USAGE_STATS = getenv_boolean("SEND_ANONYMOUS_USAGE_STATS", default=True)
@@ -62,21 +76,39 @@ FEATURE_TELEGRAM_INTEGRATION_ENABLED = getenv_boolean("FEATURE_TELEGRAM_INTEGRAT
 FEATURE_TELEGRAM_LONG_POLLING_ENABLED = getenv_boolean("FEATURE_TELEGRAM_LONG_POLLING_ENABLED", default=False)
 FEATURE_EMAIL_INTEGRATION_ENABLED = getenv_boolean("FEATURE_EMAIL_INTEGRATION_ENABLED", default=True)
 FEATURE_SLACK_INTEGRATION_ENABLED = getenv_boolean("FEATURE_SLACK_INTEGRATION_ENABLED", default=True)
+FEATURE_SLACK_CHANNEL_CREATION_ENABLED = getenv_boolean("FEATURE_SLACK_CHANNEL_CREATION_ENABLED", default=False)
+FEATURE_SLACK_ADD_USER_BEFORE_TAGGING = getenv_boolean("FEATURE_SLACK_ADD_USER_BEFORE_TAGGING", default=False)
+FEATURE_SLACK_USE_ORIGINAL_TS_IN_RESOLUTION_NOTE = getenv_boolean(
+    "FEATURE_SLACK_USE_ORIGINAL_TS_IN_RESOLUTION_NOTE", default=False
+)
 FEATURE_MULTIREGION_ENABLED = getenv_boolean("FEATURE_MULTIREGION_ENABLED", default=False)
 FEATURE_INBOUND_EMAIL_ENABLED = getenv_boolean("FEATURE_INBOUND_EMAIL_ENABLED", default=True)
 FEATURE_PROMETHEUS_EXPORTER_ENABLED = getenv_boolean("FEATURE_PROMETHEUS_EXPORTER_ENABLED", default=False)
 FEATURE_GRAFANA_ALERTING_V2_ENABLED = getenv_boolean("FEATURE_GRAFANA_ALERTING_V2_ENABLED", default=True)
+FEATURE_GRAFANA_CLOUD_CONNECTION_ENABLED = getenv_boolean("FEATURE_GRAFANA_CLOUD_CONNECTION_ENABLED", default=True)
 GRAFANA_CLOUD_ONCALL_HEARTBEAT_ENABLED = getenv_boolean("GRAFANA_CLOUD_ONCALL_HEARTBEAT_ENABLED", default=True)
 GRAFANA_CLOUD_NOTIFICATIONS_ENABLED = getenv_boolean("GRAFANA_CLOUD_NOTIFICATIONS_ENABLED", default=True)
 # Enable labels feature fo all organizations. This flag overrides FEATURE_LABELS_ENABLED_FOR_GRAFANA_ORGS
 FEATURE_LABELS_ENABLED_FOR_ALL = getenv_boolean("FEATURE_LABELS_ENABLED_FOR_ALL", default=False)
 # Enable labels feature for organizations from the list. Use OnCall organization ID, for this flag
 FEATURE_LABELS_ENABLED_PER_ORG = getenv_list("FEATURE_LABELS_ENABLED_PER_ORG", default=list())
+FEATURE_LABELS_KEY_DEFAULT_COLOR = os.environ.get("FEATURE_LABELS_KEY_DEFAULT_COLOR", "#085e19")
+FEATURE_LABELS_VALUE_DEFAULT_COLOR = os.environ.get("FEATURE_LABELS_VALUE_DEFAULT_COLOR", "#f54242")
 FEATURE_ALERT_GROUP_SEARCH_ENABLED = getenv_boolean("FEATURE_ALERT_GROUP_SEARCH_ENABLED", default=True)
 FEATURE_ALERT_GROUP_SEARCH_CUTOFF_DAYS = getenv_integer("FEATURE_ALERT_GROUP_SEARCH_CUTOFF_DAYS", default=None)
-FEATURE_NOTIFICATION_BUNDLE_ENABLED = getenv_boolean("FEATURE_NOTIFICATION_BUNDLE_ENABLED", default=True)
+
+
+FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE = get_notification_channels_to_bundle()
 FEATURE_DECLARE_INCIDENT_STEP_ENABLED = getenv_boolean("FEATURE_DECLARE_INCIDENT_STEP_ENABLED", default=False)
 FEATURE_SERVICE_DEPENDENCIES_ENABLED = getenv_boolean("FEATURE_SERVICE_DEPENDENCIES_ENABLED", default=False)
+SCHEDULE_MANAGEMENT_REQUIRE_ADMIN = getenv_boolean("SCHEDULE_MANAGEMENT_REQUIRE_ADMIN", default=False)
+FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS = getenv_boolean(
+    "FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS", default=True
+)
+FEATURE_ALLOW_DIRECT_PAGING_CREATION = getenv_boolean("FEATURE_ALLOW_DIRECT_PAGING_CREATION", default=False)
+FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION = getenv_boolean(
+    "FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION", default=False
+)
 
 TWILIO_API_KEY_SID = os.environ.get("TWILIO_API_KEY_SID")
 TWILIO_API_KEY_SECRET = os.environ.get("TWILIO_API_KEY_SECRET")
@@ -696,10 +728,13 @@ AUTHENTICATION_BACKENDS = [
     "apps.social_auth.backends.LoginSlackOAuth2V2",
     "django.contrib.auth.backends.ModelBackend",
     "apps.social_auth.backends.GoogleOAuth2",
+    "apps.social_auth.backends.OrganizationGoogleOAuth2",
 ]
 
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.environ.get("SOCIAL_AUTH_GOOGLE_OAUTH2_KEY")
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.environ.get("SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET")
+SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_KEY = SOCIAL_AUTH_GOOGLE_OAUTH2_KEY
+SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_SECRET = SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET
 GOOGLE_OAUTH2_ENABLED = SOCIAL_AUTH_GOOGLE_OAUTH2_KEY is not None and SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET is not None
 
 if GOOGLE_OAUTH2_ENABLED:
@@ -708,14 +743,19 @@ if GOOGLE_OAUTH2_ENABLED:
         "schedule": crontab(minute="*/30"),  # every 30 minutes
         "args": (),
     }
+    CELERY_BEAT_SCHEDULE["check_google_calendar_connections_for_all_organizations"] = {
+        "task": "apps.google.tasks.check_google_calendar_connections_for_all_organizations",
+        "schedule": crontab(minute="*/30"),  # every 30 minutes
+        "args": (),
+    }
 
-# NOTE: for right now we probably only need the calendar.events.readonly scope
-# however, if we want to write events back to the user's calendar
-# we'll probably need to change this to the calendar.events scope
-# (not sure how hard this is to migrate to in the future?)
+# User profile Google Calendar integration remains read-only.
 # https://developers.google.com/identity/protocols/oauth2/scopes#calendar
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = getenv_list(
     "SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE", default=["https://www.googleapis.com/auth/calendar.events.readonly"]
+)
+SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_SCOPE = getenv_list(
+    "SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_SCOPE", default=["https://www.googleapis.com/auth/calendar.events"]
 )
 
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
@@ -778,9 +818,19 @@ SOCIAL_AUTH_GOOGLE_OAUTH2_PIPELINE = (
     "apps.social_auth.pipeline.google.connect_user_to_google",
 )
 
+SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_PIPELINE = (
+    "apps.social_auth.pipeline.common.set_user_and_organization_from_request",
+    "apps.social_auth.pipeline.google.connect_organization_to_google",
+)
+
 SOCIAL_AUTH_GOOGLE_OAUTH2_DISCONNECT_PIPELINE = (
     "apps.social_auth.pipeline.common.set_user_and_organization_from_request",
     "apps.social_auth.pipeline.google.disconnect_user_google_oauth2_settings",
+)
+
+SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_DISCONNECT_PIPELINE = (
+    "apps.social_auth.pipeline.common.set_user_and_organization_from_request",
+    "apps.social_auth.pipeline.google.disconnect_organization_google_oauth2_settings",
 )
 
 # https://python-social-auth.readthedocs.io/en/latest/use_cases.html#re-prompt-google-oauth2-users-to-refresh-the-refresh-token
@@ -789,8 +839,9 @@ SOCIAL_AUTH_GOOGLE_OAUTH2_AUTH_EXTRA_ARGUMENTS = {
     # Indicates whether your application can refresh access tokens when the user is not present at the browser.
     # Valid parameter values are online, which is the default value, and offline.
     "access_type": "offline",
-    "approval_prompt": "auto",
+    "prompt": "consent",
 }
+SOCIAL_AUTH_GOOGLE_OAUTH2_ORG_AUTH_EXTRA_ARGUMENTS = SOCIAL_AUTH_GOOGLE_OAUTH2_AUTH_EXTRA_ARGUMENTS
 
 SOCIAL_AUTH_FIELDS_STORED_IN_SESSION: typing.List[str] = []
 SOCIAL_AUTH_REDIRECT_IS_HTTPS = getenv_boolean("SOCIAL_AUTH_REDIRECT_IS_HTTPS", default=True)
@@ -1019,3 +1070,111 @@ SYNC_V2_PERIOD_SECONDS = getenv_integer("SYNC_V2_PERIOD_SECONDS", 240)
 SYNC_V2_BATCH_SIZE = getenv_integer("SYNC_V2_BATCH_SIZE", 500)
 
 AUDITED_ALERT_GROUP_MAX_RETRIES = getenv_integer("AUDITED_ALERT_GROUP_MAX_RETRIES", 1)
+
+# phone call message template
+ALERT_GROUP_PHONE_CALL_TEMPLATE = os.getenv("ALERT_GROUP_PHONE_CALL_TEMPLATE") or (
+    "You are invited to check an Alert Group from Grafana OnCall. "
+    "Alert via {integration_name} with title {title} triggered {alert_count} times"
+)
+alert_group_phone_call_template_error = validate_alert_group_phone_call_template(ALERT_GROUP_PHONE_CALL_TEMPLATE)
+if alert_group_phone_call_template_error is not None:
+    raise ValueError(
+        "Invalid ALERT_GROUP_PHONE_CALL_TEMPLATE env variable: "
+        f"{alert_group_phone_call_template_error}"
+    )
+
+NOTIFICATION_BUNDLE_SMS_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_SMS_TEMPLATE") or (
+    "Grafana OnCall: "
+    "Alert group{% if total_alert_groups != 1 %}s{% endif %} {{ alert_group_codes[:3] | join(', ') }}"
+    "{% if total_alert_groups > 3 %} and {{ total_alert_groups - 3 }} more{% endif %} "
+    "from stack: {{ stack_slug }}, "
+    "integration{% if total_channels != 1 %}s{% endif %}: {{ channel_names[:1] | join(', ') }}"
+    "{% if total_channels > 1 %} and {{ total_channels - 1 }} more{% endif %}."
+)
+notification_bundle_sms_template_error = validate_notification_bundle_sms_template(NOTIFICATION_BUNDLE_SMS_TEMPLATE)
+if notification_bundle_sms_template_error is not None:
+    raise ValueError(
+        "Invalid NOTIFICATION_BUNDLE_SMS_TEMPLATE env variable: "
+        f"{notification_bundle_sms_template_error}"
+    )
+
+NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE = os.getenv("NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE") or (
+    "{% if total_alert_groups == 0 %}Grafana OnCall. Multiple alert groups require your attention."
+    "{% else %}Grafana OnCall. "
+    "Alert group{% if total_alert_groups != 1 %}s{% endif %} {{ alert_group_codes[:3] | join(', ') }}"
+    "{% if total_alert_groups > 3 %} and {{ total_alert_groups - 3 }} more{% endif %}. "
+    "From stack {{ stack_slug }}. "
+    "Triggered by integration{% if total_channels != 1 %}s{% endif %} {{ channel_names[:1] | join(', ') }}"
+    "{% if total_channels > 1 %} and {{ total_channels - 1 }} more{% endif %}."
+    "{% endif %}"
+)
+notification_bundle_phonecall_template_error = validate_notification_bundle_phonecall_template(
+    NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE
+)
+if notification_bundle_phonecall_template_error is not None:
+    raise ValueError(
+        "Invalid NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE env variable: "
+        f"{notification_bundle_phonecall_template_error}"
+    )
+
+phone_call_instructions_config_raw = os.getenv(
+    "PHONE_CALL_INSTRUCTIONS_CONFIG",
+    json.dumps(
+        {
+            "acknowledge_button": "1",
+            "resolve_button": "2",
+            "silence_button": "3",
+            "wait_time_for_user_action": 5,
+        }
+    ),
+)
+PHONE_CALL_INSTRUCTIONS_CONFIG, phone_call_instructions_config_error = parse_phone_call_instructions_config(
+    phone_call_instructions_config_raw
+)
+if phone_call_instructions_config_error is not None:
+    raise ValueError(
+        "Invalid PHONE_CALL_INSTRUCTIONS_CONFIG env variable: "
+        f"{phone_call_instructions_config_error}"
+    )
+
+PHONE_CALL_INSTRUCTIONS_TEMPLATE = os.getenv("PHONE_CALL_INSTRUCTIONS_TEMPLATE") or (
+    get_default_phone_call_instructions_template(PHONE_CALL_INSTRUCTIONS_CONFIG)
+)
+phone_call_instructions_template_error = validate_phone_call_instructions_template(PHONE_CALL_INSTRUCTIONS_TEMPLATE)
+if phone_call_instructions_template_error is not None:
+    raise ValueError(
+        "Invalid PHONE_CALL_INSTRUCTIONS_TEMPLATE env variable: "
+        f"{phone_call_instructions_template_error}"
+    )
+
+phone_call_action_response_template_default = {
+    "acknowledge_success_message": "The alert is Acknowledged",
+    "resolve_success_message": "The alert is marked Resolved",
+    "silence_success_message": "The alert is Silenced",
+    "acknowledge_skipped_resolved_message": (
+        "This alert group couldn't be acknowledged because it was marked resolved recently"
+    ),
+    "acknowledge_bundle_skipped_resolved_message": (
+        "Some alert groups couldn't be acknowledged because they were marked resolved recently"
+    ),
+    "acknowledge_bundle_all_resolved_message": (
+        "These alert groups couldn't be acknowledged because they were marked resolved recently"
+    ),
+}
+phone_call_action_response_template_raw = os.getenv(
+    "PHONE_CALL_ACTION_RESPONSE_TEMPLATE",
+    json.dumps(phone_call_action_response_template_default),
+)
+PHONE_CALL_ACTION_RESPONSE_TEMPLATE, phone_call_action_response_template_error = parse_phone_call_action_response_template(
+    phone_call_action_response_template_raw
+)
+if phone_call_action_response_template_error is not None:
+    raise ValueError(
+        "Invalid PHONE_CALL_ACTION_RESPONSE_TEMPLATE env variable: "
+        f"{phone_call_action_response_template_error}"
+    )
+
+PHONE_CALL_ACTION_RESPONSE_TEMPLATE = {
+    **phone_call_action_response_template_default,
+    **(PHONE_CALL_ACTION_RESPONSE_TEMPLATE or {}),
+}

@@ -21,7 +21,9 @@ def test_features_view(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert isinstance(response.json(), list)
+    assert isinstance(response.json()["enabled_features"], list)
+    assert "label_key_default_color" in response.json()
+    assert "label_value_default_color" in response.json()
 
 
 @pytest.mark.django_db
@@ -29,8 +31,12 @@ def test_features_view(
     "feature_attr,expected_feature",
     [
         ("FEATURE_SLACK_INTEGRATION_ENABLED", Feature.SLACK),
+        ("FEATURE_SLACK_CHANNEL_CREATION_ENABLED", Feature.SLACK_CHANNEL_CREATION),
         ("FEATURE_TELEGRAM_INTEGRATION_ENABLED", Feature.TELEGRAM),
+        ("FEATURE_EMAIL_INTEGRATION_ENABLED", Feature.EMAIL),
         ("FEATURE_LIVE_SETTINGS_ENABLED", Feature.LIVE_SETTINGS),
+        ("FEATURE_GRAFANA_CLOUD_CONNECTION_ENABLED", Feature.GRAFANA_CLOUD_CONNECTION),
+        ("FEATURE_ALLOW_DIRECT_PAGING_CREATION", Feature.ALLOW_DIRECT_PAGING_CREATION),
     ],
 )
 def test_core_features_switch(
@@ -48,13 +54,13 @@ def test_core_features_switch(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert expected_feature in response.json()
+    assert expected_feature in response.json()["enabled_features"]
 
     setattr(settings, feature_attr, False)
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert expected_feature not in response.json()
+    assert expected_feature not in response.json()["enabled_features"]
 
 
 @pytest.mark.django_db
@@ -69,9 +75,9 @@ def test_oss_features_enabled_in_oss_installation_by_default(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert Feature.GRAFANA_CLOUD_CONNECTION in response.json()
-    assert Feature.GRAFANA_CLOUD_NOTIFICATIONS in response.json()
-    assert Feature.MSTEAMS not in response.json()
+    assert Feature.GRAFANA_CLOUD_CONNECTION in response.json()["enabled_features"]
+    assert Feature.GRAFANA_CLOUD_NOTIFICATIONS in response.json()["enabled_features"]
+    assert Feature.MSTEAMS not in response.json()["enabled_features"]
 
 
 @pytest.mark.django_db
@@ -86,7 +92,7 @@ def test_non_oss_features_enabled(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert Feature.MSTEAMS in response.json()
+    assert Feature.MSTEAMS in response.json()["enabled_features"]
 
 
 @pytest.mark.django_db
@@ -111,8 +117,8 @@ def test_oss_features_switch(
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_200_OK
-    assert expected_feature in response.json()
+    assert expected_feature in response.json()["enabled_features"]
 
     setattr(settings, feature_attr, False)
     response = client.get(url, format="json", **make_user_auth_headers(user, token))
-    assert expected_feature not in response.json()
+    assert expected_feature not in response.json()["enabled_features"]

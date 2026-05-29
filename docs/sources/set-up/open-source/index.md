@@ -110,6 +110,10 @@ features:
       type: message
       callback_id: add_resolution_note
       description: Add this message to resolution note
+    - name: Remove from resolution note
+      type: message
+      callback_id: remove_resolution_note
+      description: Remove this message from resolution note
   slash_commands:
     - command: /escalate
       url: <ONCALL_ENGINE_PUBLIC_URL>/slack/interactive_api_endpoint/
@@ -181,6 +185,8 @@ settings:
    SLACK_CLIENT_OAUTH_SECRET = Basic Information -> App Credentials -> Client Secret
    SLACK_SIGNING_SECRET = Basic Information -> App Credentials -> Signing Secret
    SLACK_INSTALL_RETURN_REDIRECT_HOST = << OnCall external URL >>
+   FEATURE_SLACK_ADD_USER_BEFORE_TAGGING = True/False (Wether to add users to the chatops channel before tagging them in thread if they are not already in the channel)
+   FEATURE_SLACK_CHANNEL_CREATION_ENABLED = True/False (Wether to enable custom slack channel creation for alertgroups, configured on each integration level)
    ```
 
 1. In OnCall, navigate to **ChatOps**, select Slack and click **Install Slack integration**.
@@ -279,6 +285,34 @@ notifications using Twilio, complete the following steps:
 
 1. Set `GRAFANA_CLOUD_NOTIFICATIONS_ENABLED` as **False** to ensure the Grafana OSS <-> Cloud connector is disabled.
 2. From your **OnCall** environment, select **Env Variables** and configure all variables starting with `TWILIO_`.
+
+Additionally, you can provide the following settings for finer control over phone call behavior:
+
+- `PHONE_CALL_INSTRUCTIONS_CONFIG` - JSON object used by the Twilio app to control call actions and timing. Supported keys are:
+  - `acknowledge_button` - button for acknowledge. This should be a valid DTMF key: `0-9`, `*`, or `#`. Default: `1`.
+  - `resolve_button` - optional button for resolve. Resolve is enabled only when this value is a valid DTMF key.
+  - `silence_button` - optional button for silence. Silence is enabled only when this value is a valid DTMF key.
+  - `repeat_button` - optional button for replaying the alert message. Repeat is enabled only when this value is a valid DTMF key.
+  - `silence_in_minutes` - optional silence duration in minutes. Default: `30`.
+  - `wait_time_for_user_action` - optional timeout in seconds while waiting for keypad input. Default: `5`.
+- `PHONE_CALL_INSTRUCTIONS_TEMPLATE` - Python format string used to render the spoken instructions after the alert message. Available variables are `acknowledge_button`, `resolve_button`, `silence_button`, `repeat_button`, and `silence_in_minutes`.
+- `ALERT_GROUP_PHONE_CALL_TEMPLATE` - template used to render the alert message read to the recipient. Available variables are `integration_name`, `title`, and `alert_count`.
+
+If `PHONE_CALL_INSTRUCTIONS_TEMPLATE` is not set, Grafana OnCall builds a default instructions sentence from the enabled actions in `PHONE_CALL_INSTRUCTIONS_CONFIG`.
+If `resolve_button`, `silence_button`, or `repeat_button` are missing or not valid DTMF keys, those actions are disabled and omitted from the default instructions.
+
+Example:
+
+```json
+{
+  "acknowledge_button": "1",
+  "resolve_button": "2",
+  "silence_button": "3",
+  "repeat_button": "4",
+  "silence_in_minutes": 30,
+  "wait_time_for_user_action": 5
+}
+```
 
 ### Zvonok.com
 

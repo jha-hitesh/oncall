@@ -16,6 +16,7 @@ import { ApiSchemas } from 'network/oncall-api/api.types';
 import { IntegrationHelper } from 'pages/integration/Integration.helper';
 import { getIntegrationStyles } from 'pages/integration/Integration.styles';
 import { MONACO_INPUT_HEIGHT_TALL } from 'pages/integration/IntegrationCommon.config';
+import { AppFeature } from 'state/features';
 import { useStore } from 'state/useStore';
 
 interface IntegrationTemplateListProps {
@@ -34,7 +35,7 @@ export const IntegrationTemplateList: React.FC<IntegrationTemplateListProps> = o
     alertReceiveChannelIsBasedOnAlertManager,
     alertReceiveChannelAllowSourceBasedResolving,
   }) => {
-    const { alertReceiveChannelStore, features } = useStore();
+    const { alertReceiveChannelStore, features, organizationStore } = useStore();
     const [isRestoringTemplate, setIsRestoringTemplate] = useState(false);
     const [templateRestoreName, setTemplateRestoreName] = useState<string>(undefined);
     const [autoresolveValue, setAutoresolveValue] = useState(alertReceiveChannelAllowSourceBasedResolving);
@@ -48,7 +49,12 @@ export const IntegrationTemplateList: React.FC<IntegrationTemplateListProps> = o
       openNotification('Autoresolve ' + (event.target.checked ? 'enabled' : 'disabled'));
     }, []);
 
-    const templatesToRender = getTemplatesToRender(features);
+    const templatesToRender = getTemplatesToRender({
+      ...features,
+      [AppFeature.SlackChannelCreation]:
+        Boolean(features?.[AppFeature.SlackChannelCreation]) &&
+        Boolean(organizationStore.currentOrganization?.slack_team_identity),
+    });
 
     return (
       <div>

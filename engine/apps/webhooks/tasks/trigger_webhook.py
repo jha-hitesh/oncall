@@ -23,6 +23,8 @@ from apps.webhooks.utils import (
     InvalidWebhookUrl,
     serialize_event,
 )
+from common.jinja_templater import apply_jinja_template
+from common.jinja_templater.apply_jinja_template import JinjaTemplateError, JinjaTemplateWarning
 from common.custom_celery_tasks import shared_dedicated_queue_retry_task
 from settings.base import WEBHOOK_RESPONSE_LIMIT
 
@@ -224,11 +226,65 @@ def make_request(
     return True, status, error, exception
 
 
+def _get_response_template_context(response: WebhookResponse) -> typing.Dict[str, typing.Any]:
+    try:
+        context = json.loads(response.event_data) if response.event_data else {}
+    except (TypeError, JSONDecodeError):
+        context = {}
+
+    if not isinstance(context, dict):
+        context = {}
+
+    if response.content is None:
+        webhook_response: typing.Any = None
+    else:
+        try:
+            webhook_response = json.loads(response.content)
+        except (TypeError, JSONDecodeError):
+            webhook_response = response.content
+
+    context["webhook_response"] = webhook_response
+    return context
+
+
+def _build_timeline_response_message(webhook: Webhook, response: WebhookResponse) -> str:
+    if response.content is None:
+        return "no response received"
+
+    if not webhook.response_template:
+        return response.content
+
+    try:
+        return apply_jinja_template(webhook.response_template, **_get_response_template_context(response))
+    except (JinjaTemplateError, JinjaTemplateWarning):
+        return response.content
+
+
+def _create_webhook_response_timeline_log(
+    alert_group: AlertGroup, webhook: Webhook, response: typing.Optional[WebhookResponse], user: typing.Optional[User]
+) -> typing.Optional[AlertGroupLogRecord]:
+    if not webhook.add_response_to_timeline or response is None:
+        return None
+
+    return AlertGroupLogRecord.objects.create(
+        type=AlertGroupLogRecord.TYPE_CUSTOM_WEBHOOK_TRIGGERED,
+        alert_group=alert_group,
+        author=user,
+        reason=_build_timeline_response_message(webhook, response),
+        step_specific_info={
+            "webhook_name": webhook.name,
+            "webhook_id": webhook.public_primary_key,
+            "response_log": True,
+        },
+    )
+
+
 @shared_dedicated_queue_retry_task(
     autoretry_for=(Exception,), retry_backoff=True, max_retries=1 if settings.DEBUG else EXECUTE_WEBHOOK_RETRIES
 )
 def execute_webhook(webhook_pk, alert_group_id, user_id, escalation_policy_id, trigger_type=None, manual_retry_num=0):
     from apps.webhooks.models import Webhook
+    from apps.alerts.tasks import send_alert_group_signal
 
     try:
         webhook = Webhook.objects.get(pk=webhook_pk)
@@ -289,7 +345,7 @@ def execute_webhook(webhook_pk, alert_group_id, user_id, escalation_policy_id, t
         reason = error
 
     if triggered:
-        AlertGroupLogRecord.objects.create(
+        log_record = AlertGroupLogRecord.objects.create(
             type=log_type,
             alert_group=alert_group,
             author=user,
@@ -304,6 +360,11 @@ def execute_webhook(webhook_pk, alert_group_id, user_id, escalation_policy_id, t
             escalation_policy_step=step,
             escalation_error_code=error_code,
         )
+        send_alert_group_signal.delay(log_record.pk)
+
+        response_log_record = _create_webhook_response_timeline_log(alert_group, webhook, response, user)
+        if response_log_record is not None:
+            send_alert_group_signal.delay(response_log_record.pk)
 
     if isinstance(exception, EXECUTE_WEBHOOK_EXCEPTIONS_TO_MANUALLY_RETRY):
         msg_details = (

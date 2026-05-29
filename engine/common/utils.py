@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import string
 import time
 from contextlib import contextmanager
 from functools import reduce
@@ -17,8 +18,46 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.utils.html import urlize
+from jinja2 import TemplateAssertionError, TemplateSyntaxError, meta
+from jinja2.exceptions import SecurityError, UndefinedError
+from jinja2.sandbox import SandboxedEnvironment
 
 logger = get_task_logger(__name__)
+
+PHONE_CALL_TEMPLATE_FORMAT_FIELDS = {
+    "acknowledge_button",
+    "resolve_button",
+    "silence_button",
+    "repeat_button",
+    "silence_in_minutes",
+}
+ALERT_GROUP_PHONE_CALL_TEMPLATE_FORMAT_FIELDS = {"integration_name", "title", "alert_count"}
+PHONE_CALL_BUTTON_CONFIG_KEYS = (
+    "acknowledge_button",
+    "resolve_button",
+    "silence_button",
+    "repeat_button",
+)
+PHONE_CALL_INTEGER_CONFIG_KEYS = ("wait_time_for_user_action", "silence_in_minutes")
+PHONE_CALL_MESSAGE_CONFIG_KEYS = ("acknowledge_message", "resolve_message", "silence_message")
+PHONE_CALL_INSTRUCTIONS_TEMPLATE_SAMPLE_CONTEXT = {
+    "acknowledge_button": "1",
+    "resolve_button": "2",
+    "silence_button": "3",
+    "repeat_button": "0",
+    "silence_in_minutes": 30,
+}
+NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT = {
+    "total_alert_groups": 2,
+    "total_channels": 2,
+    "channel_names": ["Grafana", "PagerDuty"],
+    "alert_group_names": ["CPU high", "Memory high"],
+    "alert_group_codes": ["#1", "#2"],
+    "stack_slug": "test-stack",
+}
+# NOTE: bundled SMS and bundled phone-call templates share the same rendering context.
+NOTIFICATION_BUNDLE_SMS_TEMPLATE_SAMPLE_CONTEXT = dict(NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT)
+SETTINGS_JINJA_TEMPLATE_ENV = SandboxedEnvironment()
 
 
 # Faker that always returns unique values
@@ -165,6 +204,251 @@ def getenv_list(variable_name: str, default: list) -> list:
         return default
 
     return json.loads(value)
+
+
+def get_notification_channels_to_bundle() -> list[str]:
+    allowed_values = {"SMS", "PHONE_CALL"}
+    channels = [
+        channel.strip().upper()
+        for channel in os.environ.get("FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE", "SMS").split(",")
+    ]
+    channels = [channel for channel in channels if channel]
+
+    invalid_channels = sorted(set(channels) - allowed_values)
+    if invalid_channels:
+        raise ValueError(
+            "Invalid FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE env variable values: "
+            f"{', '.join(invalid_channels)}. Allowed values are: SMS, PHONE_CALL"
+        )
+
+    return channels
+
+
+def _get_invalid_template_variable_error(invalid_fields: set[str], allowed_fields: set[str]) -> str:
+    invalid_variables = ", ".join(sorted(invalid_fields))
+    allowed_variables = ", ".join(sorted(allowed_fields))
+    suffix = "s" if len(invalid_fields) > 1 else ""
+    return f"Invalid template variable{suffix}: {invalid_variables}. Allowed variables are: {allowed_variables}"
+
+
+def validate_format_template(template: str, *, allowed_fields: set[str], sample_context: dict[str, object]) -> str | None:
+    if not isinstance(template, str):
+        return "Must be a string"
+
+    formatter = string.Formatter()
+
+    try:
+        invalid_fields = set()
+        for _, field_name, _, _ in formatter.parse(template):
+            if field_name is None:
+                continue
+            if field_name == "":
+                return "Positional placeholders are not supported"
+
+            root_field_name = field_name.split(".", 1)[0].split("[", 1)[0]
+            if root_field_name not in allowed_fields:
+                invalid_fields.add(root_field_name)
+
+        if invalid_fields:
+            return _get_invalid_template_variable_error(invalid_fields, allowed_fields)
+
+        template.format(**sample_context)
+    except (KeyError, IndexError, ValueError) as err:
+        return f"Invalid format template: {err}"
+
+    return None
+
+
+def validate_jinja_template(
+    template: str,
+    *,
+    allowed_variables: set[str],
+    sample_context: dict[str, object],
+) -> str | None:
+    if not isinstance(template, str):
+        return "Must be a string"
+
+    try:
+        parsed_template = SETTINGS_JINJA_TEMPLATE_ENV.parse(template)
+        available_variables = allowed_variables | set(SETTINGS_JINJA_TEMPLATE_ENV.globals)
+        invalid_variables = meta.find_undeclared_variables(parsed_template) - available_variables
+        if invalid_variables:
+            return _get_invalid_template_variable_error(invalid_variables, allowed_variables)
+
+        SETTINGS_JINJA_TEMPLATE_ENV.from_string(template).render(**sample_context)
+    except SecurityError as err:
+        return f"Invalid Jinja template: {err}"
+    except (TemplateAssertionError, TemplateSyntaxError) as err:
+        return f"Invalid Jinja template: {err}"
+    except (TypeError, KeyError, ValueError, UndefinedError) as err:
+        return f"Invalid Jinja template: {err}"
+
+    return None
+
+
+def _get_valid_integer_value(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def parse_phone_call_instructions_config(config: str | dict | None) -> tuple[dict | None, str | None]:
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError as err:
+            return None, f"Invalid JSON: {err.msg}"
+
+    if not isinstance(config, dict):
+        return None, "Must be a JSON object"
+
+    for key in PHONE_CALL_BUTTON_CONFIG_KEYS:
+        if key not in config or config[key] is None:
+            continue
+        if not is_valid_phone_call_button(config[key]):
+            return None, f"Invalid value for {key}: expected a digit, '*' or '#'"
+
+    for key in PHONE_CALL_INTEGER_CONFIG_KEYS:
+        if key not in config or config[key] is None:
+            continue
+        if _get_valid_integer_value(config[key]) is None:
+            return None, f"Invalid value for {key}: expected an integer"
+
+    for key in PHONE_CALL_MESSAGE_CONFIG_KEYS:
+        if key not in config or config[key] is None:
+            continue
+        if not isinstance(config[key], str):
+            return None, f"Invalid value for {key}: expected a string"
+
+    configured_buttons: dict[str, list[str]] = {}
+    for key in PHONE_CALL_BUTTON_CONFIG_KEYS:
+        value = config.get(key)
+        if value is None:
+            continue
+        configured_buttons.setdefault(str(value), []).append(key)
+
+    duplicate_buttons = {button: keys for button, keys in configured_buttons.items() if len(keys) > 1}
+    if duplicate_buttons:
+        duplicate_button, duplicate_keys = sorted(duplicate_buttons.items())[0]
+        joined_keys = ", ".join(duplicate_keys)
+        return None, f"Invalid value for button configuration: {duplicate_button} is used by {joined_keys}"
+
+    return config, None
+
+
+def validate_phone_call_instructions_config(config: str | dict | None) -> str | None:
+    _, error = parse_phone_call_instructions_config(config)
+    return error
+
+
+PHONE_CALL_ACTION_RESPONSE_TEMPLATE_KEYS = {
+    "acknowledge_success_message",
+    "resolve_success_message",
+    "silence_success_message",
+    "acknowledge_skipped_resolved_message",
+    "acknowledge_bundle_skipped_resolved_message",
+    "acknowledge_bundle_all_resolved_message",
+}
+
+
+def parse_phone_call_action_response_template(template: str | dict | None) -> tuple[dict | None, str | None]:
+    if isinstance(template, str):
+        try:
+            template = json.loads(template)
+        except json.JSONDecodeError as err:
+            return None, f"Invalid JSON: {err.msg}"
+
+    if not isinstance(template, dict):
+        return None, "Must be a JSON object"
+
+    unknown_keys = set(template) - PHONE_CALL_ACTION_RESPONSE_TEMPLATE_KEYS
+    if unknown_keys:
+        unknown_key = sorted(unknown_keys)[0]
+        allowed_keys = ", ".join(sorted(PHONE_CALL_ACTION_RESPONSE_TEMPLATE_KEYS))
+        return None, f"Invalid key {unknown_key}: allowed keys are: {allowed_keys}"
+
+    for key, value in template.items():
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return None, f"Invalid value for {key}: expected a string"
+
+    return template, None
+
+
+def validate_phone_call_action_response_template(template: str | dict | None) -> str | None:
+    _, error = parse_phone_call_action_response_template(template)
+    return error
+
+
+def validate_phone_call_instructions_template(template: str) -> str | None:
+    return validate_format_template(
+        template,
+        allowed_fields=PHONE_CALL_TEMPLATE_FORMAT_FIELDS,
+        sample_context=PHONE_CALL_INSTRUCTIONS_TEMPLATE_SAMPLE_CONTEXT,
+    )
+
+
+def validate_alert_group_phone_call_template(template: str) -> str | None:
+    return validate_format_template(
+        template,
+        allowed_fields=ALERT_GROUP_PHONE_CALL_TEMPLATE_FORMAT_FIELDS,
+        sample_context={"integration_name": "Grafana", "title": "CPU high", "alert_count": 3},
+    )
+
+
+def validate_notification_bundle_phonecall_template(template: str) -> str | None:
+    return validate_jinja_template(
+        template,
+        allowed_variables=set(NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT),
+        sample_context=NOTIFICATION_BUNDLE_PHONECALL_TEMPLATE_SAMPLE_CONTEXT,
+    )
+
+
+def validate_notification_bundle_sms_template(template: str) -> str | None:
+    return validate_jinja_template(
+        template,
+        allowed_variables=set(NOTIFICATION_BUNDLE_SMS_TEMPLATE_SAMPLE_CONTEXT),
+        sample_context=NOTIFICATION_BUNDLE_SMS_TEMPLATE_SAMPLE_CONTEXT,
+    )
+
+
+def is_valid_phone_call_button(value) -> bool:
+    if value is None:
+        return False
+    value = str(value)
+    return value.isdigit() or value in {"*", "#"}
+
+
+def get_default_phone_call_instructions_template(config: dict) -> str:
+    action_phrases = []
+    acknowledge_button = config.get("acknowledge_button")
+    if is_valid_phone_call_button(acknowledge_button):
+        action_phrases.append(f"Press {{acknowledge_button}} to acknowledge")
+
+    resolve_button = config.get("resolve_button")
+    if is_valid_phone_call_button(resolve_button):
+        action_phrases.append("{resolve_button} to resolve")
+
+    silence_button = config.get("silence_button")
+    if is_valid_phone_call_button(silence_button):
+        action_phrases.append("{silence_button} to silence for {silence_in_minutes} minutes")
+
+    repeat_button = config.get("repeat_button")
+    if is_valid_phone_call_button(repeat_button):
+        action_phrases.append("{repeat_button} to repeat this message")
+
+    if not action_phrases:
+        return "No phone call actions are configured"
+    if len(action_phrases) == 1:
+        return action_phrases[0]
+    if len(action_phrases) == 2:
+        return " and ".join(action_phrases)
+    return ", ".join(action_phrases[:-1]) + f" and {action_phrases[-1]}"
 
 
 def batch_queryset(qs, batch_size=1000):

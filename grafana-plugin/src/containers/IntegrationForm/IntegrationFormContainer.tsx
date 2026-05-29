@@ -9,9 +9,11 @@ import { Block } from 'components/GBlock/Block';
 import { IntegrationLogo } from 'components/IntegrationLogo/IntegrationLogo';
 import { Text } from 'components/Text/Text';
 import { ApiSchemas } from 'network/oncall-api/api.types';
+import { AppFeature } from 'state/features';
 import { useStore } from 'state/useStore';
 
 import { IntegrationForm } from './IntegrationForm';
+import { filterAlertReceiveChannelOptions } from './IntegrationFormContainer.helpers';
 import { getIntegrationFormContainerStyles } from './IntegrationFormContainer.styles';
 
 interface IntegrationFormContainerProps {
@@ -38,21 +40,12 @@ export const IntegrationFormContainer = observer((props: IntegrationFormContaine
   const { alertReceiveChannelOptions } = alertReceiveChannelStore;
 
   const options = alertReceiveChannelOptions
-    ? alertReceiveChannelOptions.filter((option: ApiSchemas['AlertReceiveChannelIntegrationOptions']) => {
-        if (option.value === 'grafana_alerting' && !window.grafanaBootData.settings.unifiedAlertingEnabled) {
-          return false;
-        }
-
-        // don't allow creating direct paging integrations
-        if (option.value === 'direct_paging') {
-          return false;
-        }
-
-        return (
-          option.display_name.toLowerCase().includes(filterValue.toLowerCase()) &&
-          !option.value.toLowerCase().startsWith('legacy_')
-        );
-      })
+    ? filterAlertReceiveChannelOptions(
+        alertReceiveChannelOptions,
+        filterValue,
+        window.grafanaBootData.settings.unifiedAlertingEnabled,
+        Boolean(store.hasFeature(AppFeature.AllowDirectPagingCreation))
+      )
     : [];
 
   return (

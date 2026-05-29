@@ -1,7 +1,7 @@
 import { DataSourceRef } from '@grafana/schema';
 
 export interface InsightsConfig {
-  isOpenSource: boolean;
+  allowDatasourceSelection: boolean;
   datasource: DataSourceRef;
   stack: string;
 }

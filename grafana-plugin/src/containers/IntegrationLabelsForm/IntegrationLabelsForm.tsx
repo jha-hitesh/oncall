@@ -3,6 +3,7 @@ import React, { ChangeEvent, useState } from 'react';
 import { css } from '@emotion/css';
 import { ServiceLabels } from '@grafana/labels';
 import { Alert, Button, Drawer, Dropdown, InlineSwitch, Input, Menu, Stack, useStyles2 } from '@grafana/ui';
+import { UserActions, isUserActionAllowed } from 'helpers/authorization/authorization';
 import { DOCS_ROOT, StackSize, GENERIC_ERROR } from 'helpers/consts';
 import { openErrorNotification } from 'helpers/helpers';
 import { observer } from 'mobx-react';
@@ -264,6 +265,7 @@ const CustomLabels = (props: CustomLabelsProps) => {
   const { alertGroupLabels, onChange, onShowTemplateEditor, customLabelsErrors } = props;
 
   const { labelsStore } = useStore();
+  const canManageLabels = isUserActionAllowed(UserActions.OnCallAdmin);
 
   const handleStaticLabelAdd = () => {
     onChange({
@@ -321,10 +323,10 @@ const CustomLabels = (props: CustomLabelsProps) => {
         value={alertGroupLabels.custom}
         onLoadKeys={onLoadKeys}
         onLoadValuesForKey={onLoadValuesForKey}
-        onCreateKey={labelsStore.createKey}
-        onUpdateKey={labelsStore.updateKey}
-        onCreateValue={labelsStore.createValue}
-        onUpdateValue={labelsStore.updateKeyValue}
+        onCreateKey={canManageLabels ? labelsStore.createKey : undefined}
+        onUpdateKey={canManageLabels ? labelsStore.updateKey : undefined}
+        onCreateValue={canManageLabels ? labelsStore.createValue : undefined}
+        onUpdateValue={canManageLabels ? labelsStore.updateKeyValue : undefined}
         onUpdateError={(res) => {
           if (res?.response?.status === 409) {
             openErrorNotification(`Duplicate values are not allowed`);
@@ -379,7 +381,11 @@ const CustomLabels = (props: CustomLabelsProps) => {
           </Menu>
         }
       >
-        <Button variant="secondary" icon="plus" disabled={getIsAddBtnDisabled(alertGroupLabels)}>
+        <Button
+          variant="secondary"
+          icon="plus"
+          disabled={!canManageLabels || getIsAddBtnDisabled(alertGroupLabels)}
+        >
           Add label
         </Button>
       </Dropdown>

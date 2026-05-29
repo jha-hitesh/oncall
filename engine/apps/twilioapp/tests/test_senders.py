@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 from django.conf import settings
 
 from apps.twilioapp.phone_provider import TwilioPhoneProvider
@@ -142,6 +143,33 @@ def test_use_country_code_senders(
     with patch(
         "apps.twilioapp.phone_provider.TwilioPhoneProvider._parse_number",
         return_value=(True, None, "1"),
+    ):
+        provider = TwilioPhoneProvider()
+        client, _from = sender(provider, "")
+        assert _from == expected_from
+        assert client.username == DB_TWILIO_ACCOUNT_SID
+        assert client.password == DB_TWILIO_AUTH_TOKEN
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "sender,expected_from",
+    [
+        (TwilioPhoneProvider._phone_sender, DB_DEFAULT_PHONE),
+        (TwilioPhoneProvider._sms_sender, DB_DEFAULT_SMS),
+        (TwilioPhoneProvider._verify_sender, DB_DEFAULT_VERIFY),
+    ],
+)
+def test_fallback_to_default_sender_when_parse_number_request_fails(
+    setup_env_default_twilio,
+    setup_default_senders,
+    setup_us_senders,
+    sender,
+    expected_from,
+):
+    with patch(
+        "apps.twilioapp.phone_provider.TwilioPhoneProvider._parse_number",
+        side_effect=requests.RequestException("dns failure"),
     ):
         provider = TwilioPhoneProvider()
         client, _from = sender(provider, "")

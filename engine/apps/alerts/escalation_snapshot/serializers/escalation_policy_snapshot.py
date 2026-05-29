@@ -61,6 +61,7 @@ class EscalationPolicySnapshotSerializer(serializers.ModelSerializer):
     notify_schedule = PrimaryKeyRelatedFieldWithNoneValue(allow_null=True, queryset=OnCallSchedule.objects)
     num_alerts_in_window = serializers.IntegerField(allow_null=True, default=None)
     num_minutes_in_window = serializers.IntegerField(allow_null=True, default=None)
+    invitees = serializers.ChoiceField(choices=EscalationPolicy.INVITEES_CHOICES, allow_null=True, default=None)
     pause_escalation = serializers.BooleanField(default=False)
     last_notified_user = PrimaryKeyRelatedFieldWithNoneValue(allow_null=True, queryset=User.objects)
 
@@ -77,6 +78,7 @@ class EscalationPolicySnapshotSerializer(serializers.ModelSerializer):
             "to_time",
             "num_alerts_in_window",
             "num_minutes_in_window",
+            "invitees",
             "severity",
             "custom_webhook",
             "notify_schedule",

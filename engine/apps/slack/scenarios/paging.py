@@ -42,6 +42,8 @@ DIRECT_PAGING_TEAM_SEVERITY_CHECKBOXES_ID = "paging_team_severity_checkboxes"
 DIRECT_PAGING_ORG_SELECT_ID = "paging_org_select"
 DIRECT_PAGING_USER_SELECT_ID = "paging_user_select"
 DIRECT_PAGING_MESSAGE_INPUT_ID = "paging_message_input"
+DIRECT_PAGING_DETAILED_DESCRIPTION_INPUT_ID = "paging_detailed_description_input"
+DIRECT_PAGING_DYNAMIC_LABEL_INPUT_ID = "paging_dynamic_label_input"
 
 DIRECT_PAGING_TEAM_SEVERITY_CHECKBOX_VALUE = "important"
 
@@ -213,6 +215,7 @@ class FinishDirectPaging(scenario_step.ScenarioStep):
         predefined_org: typing.Optional["Organization"] = None,
     ) -> None:
         message = _get_message_from_payload(payload)
+        detailed_description = _get_detailed_description_from_payload(payload)
         private_metadata = json.loads(payload["view"]["private_metadata"])
         predefined_org = _get_predefined_org_from_private_metadata(private_metadata, slack_team_identity)
         channel_id = private_metadata["channel_id"]
@@ -249,8 +252,10 @@ class FinishDirectPaging(scenario_step.ScenarioStep):
                 organization=selected_organization,
                 from_user=user,
                 message=message,
+                detailed_description=detailed_description,
                 team=selected_team,
                 important_team_escalation=_get_team_escalation_severity_from_payload(payload, input_id_prefix),
+                dynamic_labels_map=_get_dynamic_labels_map_from_payload(payload, input_id_prefix, selected_organization, selected_team),
                 users=selected_users,
             )
         except DirectPagingUserTeamValidationError:
@@ -340,6 +345,10 @@ class OnPagingTeamSeverityCheckboxChange(OnPagingTeamChange):
 
     NOTE: we simply reuse `OnPagingTeamChange` step, since the behavior is the same.
     """
+
+
+class OnPagingDynamicLabelChange(OnPagingTeamChange):
+    """Reload the form when a direct paging dynamic label value changes."""
 
 
 class OnPagingUserChange(scenario_step.ScenarioStep):
@@ -503,6 +512,7 @@ def render_dialog(
         selected_organization = predefined_org if predefined_org else available_organizations.first()
         is_team_selected, selected_team = False, None
         is_team_escalation_important = False
+        previous_input_id_prefix = None
     else:
         # setup form using data/state
         old_input_id_prefix, new_input_id_prefix, new_private_metadata = _get_and_change_input_id_prefix_from_metadata(
@@ -515,6 +525,7 @@ def render_dialog(
         )
         is_team_selected, selected_team = _get_selected_team_from_payload(payload, old_input_id_prefix)
         is_team_escalation_important = _get_team_escalation_severity_from_payload(payload, old_input_id_prefix)
+        previous_input_id_prefix = old_input_id_prefix
 
     blocks: Block.AnyBlocks = []
 
@@ -527,6 +538,7 @@ def render_dialog(
         blocks += _get_unauthorized_warning()
 
     blocks.append(_get_message_input(payload))
+    blocks.append(_get_detailed_description_input(payload))
 
     # Add organization select if org is not defined on chatops-proxy (it's should happen only in OSS)
     # and user has access to multiple orgs.
@@ -545,6 +557,7 @@ def render_dialog(
         is_team_escalation_important,
         new_input_id_prefix,
     )
+    blocks += _get_team_label_blocks(payload, selected_organization, selected_team, previous_input_id_prefix, new_input_id_prefix)
     blocks += _get_user_select_blocks(payload, selected_organization, new_input_id_prefix, error_msg)
 
     blocks.append(
@@ -978,6 +991,186 @@ def _get_users_select(
     }
 
 
+def _get_direct_paging_integration(
+    organization: "Organization", team: typing.Optional["Team"]
+) -> typing.Optional[AlertReceiveChannel]:
+    if team is None:
+        return None
+
+    return AlertReceiveChannel.objects.filter(
+        organization=organization,
+        team=team,
+        integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING,
+    ).first()
+
+
+def _get_team_label_blocks(
+    payload: EventPayload,
+    organization: "Organization",
+    team: typing.Optional["Team"],
+    previous_input_id_prefix: str | None,
+    new_input_id_prefix: str,
+) -> Block.AnyBlocks:
+    if team is None:
+        return []
+
+    alert_receive_channel = _get_direct_paging_integration(organization, team)
+    if alert_receive_channel is None:
+        return []
+
+    static_labels = list(alert_receive_channel.labels.select_related("key", "value").order_by("key__name", "value__name"))
+    dynamic_label_keys = _get_dynamic_label_keys(alert_receive_channel)
+
+    if not static_labels and not dynamic_label_keys:
+        return []
+
+    blocks: Block.AnyBlocks = [DIVIDER]
+
+    if static_labels:
+        static_label_text = "\n".join(f"`{label.key.name}` = `{label.value.name}`" for label in static_labels)
+        blocks.append(
+            typing.cast(
+                Block.Section,
+                {
+                    "type": "section",
+                    "block_id": "paging_static_labels",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Static labels applied*\n{static_label_text}",
+                    },
+                },
+            )
+        )
+
+    for label_key in dynamic_label_keys:
+        value_options = [
+            {
+                "text": {"type": "plain_text", "text": value.name, "emoji": True},
+                "value": json.dumps(
+                    {
+                        "key_id": label_key.id,
+                        "key_name": label_key.name,
+                        "value_id": value.id,
+                        "value_name": value.name,
+                    }
+                ),
+            }
+            for value in label_key.values.all().order_by("name", "id")
+        ]
+
+        if not value_options:
+            blocks.append(
+                typing.cast(
+                    Block.Context,
+                    {
+                        "type": "context",
+                        "block_id": f"{new_input_id_prefix}{DIRECT_PAGING_DYNAMIC_LABEL_INPUT_ID}_{label_key.id}_warning",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f":warning: No values available for dynamic label `{label_key.name}`.",
+                            }
+                        ],
+                    },
+                )
+            )
+            continue
+
+        dynamic_label_block: Block.Input = {
+            "type": "input",
+            "block_id": _get_dynamic_label_block_id(new_input_id_prefix, label_key.id),
+            "label": {"type": "plain_text", "text": label_key.name},
+            "element": {
+                "type": "static_select",
+                "action_id": OnPagingDynamicLabelChange.routing_uid(),
+                "placeholder": {"type": "plain_text", "text": "Select label value", "emoji": True},
+                "options": value_options,
+            },
+            "dispatch_action": True,
+        }
+
+        selected_value_id = _get_selected_dynamic_label_value_id_from_payload(payload, previous_input_id_prefix, label_key.id)
+        if selected_value_id is not None:
+            initial_option = next((option for option in value_options if json.loads(option["value"])["value_id"] == selected_value_id), None)
+            if initial_option is not None:
+                dynamic_label_block["element"]["initial_option"] = initial_option
+
+        blocks.append(dynamic_label_block)
+
+    return blocks
+
+
+def _get_dynamic_label_keys(alert_receive_channel: AlertReceiveChannel) -> list["LabelKeyCache"]:
+    from apps.labels.models import LabelKeyCache
+
+    key_ids: list[str] = []
+    for key_id, value_id, _ in alert_receive_channel.alert_group_labels_custom or []:
+        if value_id is None and key_id not in key_ids:
+            key_ids.append(key_id)
+
+    if not key_ids:
+        return []
+
+    label_keys = {
+        key.id: key
+        for key in LabelKeyCache.objects.filter(id__in=key_ids, organization=alert_receive_channel.organization).prefetch_related(
+            "values"
+        )
+    }
+    return [label_keys[key_id] for key_id in key_ids if key_id in label_keys]
+
+
+def _get_dynamic_label_block_id(input_id_prefix: str, key_id: str) -> str:
+    return f"{input_id_prefix}{DIRECT_PAGING_DYNAMIC_LABEL_INPUT_ID}_{key_id}"
+
+
+def _get_selected_dynamic_label_value_id_from_payload(
+    payload: EventPayload, input_id_prefix: str | None, key_id: str
+) -> str | None:
+    if input_id_prefix is None:
+        return None
+
+    try:
+        selected_option = payload["view"]["state"]["values"][_get_dynamic_label_block_id(input_id_prefix, key_id)][
+            OnPagingDynamicLabelChange.routing_uid()
+        ]["selected_option"]
+    except KeyError:
+        return None
+
+    if not selected_option:
+        return None
+
+    return json.loads(selected_option["value"])["value_id"]
+
+
+def _get_dynamic_labels_map_from_payload(
+    payload: EventPayload,
+    input_id_prefix: str,
+    organization: "Organization",
+    team: typing.Optional["Team"],
+) -> dict[str, str]:
+    alert_receive_channel = _get_direct_paging_integration(organization, team)
+    if alert_receive_channel is None:
+        return {}
+
+    dynamic_labels_map: dict[str, str] = {}
+    for label_key in _get_dynamic_label_keys(alert_receive_channel):
+        try:
+            selected_option = payload["view"]["state"]["values"][_get_dynamic_label_block_id(input_id_prefix, label_key.id)][
+                OnPagingDynamicLabelChange.routing_uid()
+            ]["selected_option"]
+        except KeyError:
+            continue
+
+        if not selected_option:
+            continue
+
+        selected_value = json.loads(selected_option["value"])
+        dynamic_labels_map[selected_value["key_name"]] = selected_value["value_name"]
+
+    return dynamic_labels_map
+
+
 def _get_selected_entries_list(
     organization: "Organization", input_id_prefix: str, key: DataKey, entries: typing.List[typing.Tuple[Model, Policy]]
 ) -> typing.List[Block.Section]:
@@ -1095,16 +1288,54 @@ def _get_message_input(payload: EventPayload) -> Block.Input:
         },
         "optional": False,
     }
-    if payload.get("message", {}).get("text") is not None:
-        message_input_block["element"]["initial_value"] = payload["message"]["text"]
+    initial_value = _get_text_input_value_from_payload(payload, DIRECT_PAGING_MESSAGE_INPUT_ID)
+    if initial_value is not None:
+        message_input_block["element"]["initial_value"] = initial_value
     return message_input_block
 
 
+def _get_detailed_description_input(payload: EventPayload) -> Block.Input:
+    detailed_description_input_block: Block.Input = {
+        "type": "input",
+        "block_id": DIRECT_PAGING_DETAILED_DESCRIPTION_INPUT_ID,
+        "label": {
+            "type": "plain_text",
+            "text": "Detailed description",
+        },
+        "element": {
+            "type": "plain_text_input",
+            "action_id": FinishDirectPaging.routing_uid(),
+            "multiline": True,
+            "placeholder": {
+                "type": "plain_text",
+                "text": "Additional context for the escalation",
+            },
+        },
+        "optional": True,
+    }
+    initial_value = _get_text_input_value_from_payload(payload, DIRECT_PAGING_DETAILED_DESCRIPTION_INPUT_ID)
+    if initial_value is not None:
+        detailed_description_input_block["element"]["initial_value"] = initial_value
+    return detailed_description_input_block
+
+
 def _get_message_from_payload(payload: EventPayload) -> str:
-    return (
-        payload["view"]["state"]["values"][DIRECT_PAGING_MESSAGE_INPUT_ID][FinishDirectPaging.routing_uid()]["value"]
-        or ""
-    )
+    return _get_text_input_value_from_payload(payload, DIRECT_PAGING_MESSAGE_INPUT_ID, fallback_to_message=True) or ""
+
+
+def _get_detailed_description_from_payload(payload: EventPayload) -> str | None:
+    return _get_text_input_value_from_payload(payload, DIRECT_PAGING_DETAILED_DESCRIPTION_INPUT_ID)
+
+
+def _get_text_input_value_from_payload(
+    payload: EventPayload, block_id: str, fallback_to_message: bool = False
+) -> str | None:
+    try:
+        return payload["view"]["state"]["values"][block_id][FinishDirectPaging.routing_uid()]["value"]
+    except KeyError:
+        if fallback_to_message:
+            return payload.get("message", {}).get("text")
+        return None
 
 
 def _get_available_organizations(
@@ -1144,6 +1375,12 @@ STEPS_ROUTING: ScenarioRoute.RoutingSteps = [
         "block_action_type": BlockActionType.CHECKBOXES,
         "block_action_id": OnPagingTeamSeverityCheckboxChange.routing_uid(),
         "step": OnPagingTeamSeverityCheckboxChange,
+    },
+    {
+        "payload_type": PayloadType.BLOCK_ACTIONS,
+        "block_action_type": BlockActionType.STATIC_SELECT,
+        "block_action_id": OnPagingDynamicLabelChange.routing_uid(),
+        "step": OnPagingDynamicLabelChange,
     },
     {
         "payload_type": PayloadType.BLOCK_ACTIONS,

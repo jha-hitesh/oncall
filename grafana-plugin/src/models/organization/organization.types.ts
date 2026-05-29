@@ -19,6 +19,11 @@ export interface Organization {
     needs_reinstall: boolean;
   };
   slack_channel: SlackChannel | null;
+  rbac_enabled: boolean;
+  grafana_incident_enabled: boolean;
+  grafana_irm_enabled: boolean;
+  schedule_management_require_admin: boolean;
+  direct_paging_prefer_important_policy: boolean;
   is_resolution_note_required: boolean;
   env_status: {
     telegram_configured: boolean;
@@ -31,4 +36,6 @@ export interface Organization {
     };
     mattermost_configured: boolean;
   };
+  has_google_oauth2_organization_connected: boolean;
+  google_oauth2_organization_email: string | null;
 }

@@ -729,7 +729,7 @@ class TestIsOwnerOrHasRBACPermissions:
         ),
         (
             permissions.RBACPermission.Permissions.LABEL_READ,
-            permissions.RBACPermission.Permissions.LABEL_READ.value,
+            permissions.RBACPermission.Permissions.LABEL_READ.value.replace(PluginID.ONCALL, PluginID.IRM),
         ),
     ],
 )
@@ -770,9 +770,9 @@ def test_convert_oncall_permission_to_irm(permission, expected) -> None:
                 permissions.RBACPermission.Permissions.LABEL_READ,
             ],
             [
-                permissions.RBACPermission.Permissions.LABEL_CREATE.value,
-                permissions.RBACPermission.Permissions.LABEL_WRITE.value,
-                permissions.RBACPermission.Permissions.LABEL_READ.value,
+                permissions.RBACPermission.Permissions.LABEL_CREATE.value.replace(PluginID.ONCALL, PluginID.IRM),
+                permissions.RBACPermission.Permissions.LABEL_WRITE.value.replace(PluginID.ONCALL, PluginID.IRM),
+                permissions.RBACPermission.Permissions.LABEL_READ.value.replace(PluginID.ONCALL, PluginID.IRM),
             ],
         ),
     ],

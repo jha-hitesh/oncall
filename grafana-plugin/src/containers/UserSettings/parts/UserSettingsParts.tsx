@@ -187,7 +187,9 @@ export const TabsContent = observer(({ id, activeTab, onTabChange, isDesktopOrLa
         ) : (
           <PhoneVerification userPk={id} />
         ))}
-      {activeTab === UserSettingsTab.MobileAppConnection && renderMobileTab()}
+      {activeTab === UserSettingsTab.MobileAppConnection &&
+        store.hasFeature(AppFeature.CloudConnection) &&
+        renderMobileTab()}
       {activeTab === UserSettingsTab.SlackInfo && <SlackTab />}
       {activeTab === UserSettingsTab.TelegramInfo && <TelegramInfo />}
       {activeTab === UserSettingsTab.PersonalWebhookInfo && <PersonalWebhookInfo />}

@@ -1563,6 +1563,10 @@ export interface components {
           avatar: string;
           avatar_full: string;
         };
+        slack_channel?: {
+          title: string;
+          url: string | null;
+        } | null;
       }[];
       readonly slack_permalink: string | null;
       /** Format: date-time */
@@ -1960,12 +1964,14 @@ export interface components {
       name: string;
       /** @default false */
       prescribed: boolean;
+      color_code?: string;
     };
     CustomLabelValue: {
       id: string | null;
       name: string;
       /** @default false */
       prescribed: boolean;
+      color_code?: string;
     };
     /**
      * @description * `3600` - 3600
@@ -2104,6 +2110,7 @@ export interface components {
     Key: {
       id: string;
       name: string;
+      color_code?: string;
     };
     LabelCreate: {
       key: components['schemas']['LabelRepr'];
@@ -2114,6 +2121,9 @@ export interface components {
       name: string;
       /** @default false */
       prescribed: boolean;
+      /** @default false */
+      is_managed_label?: boolean;
+      color_code?: string;
     };
     LabelOption: {
       key: components['schemas']['LabelKey'];
@@ -2131,6 +2141,7 @@ export interface components {
       name: string;
       /** @default false */
       prescribed: boolean;
+      color_code?: string;
     };
     ListUser: {
       readonly pk: string;
@@ -2313,6 +2324,8 @@ export interface components {
       password?: string | null;
       authorization_header?: string | null;
       trigger_template?: string | null;
+      add_response_to_timeline?: boolean | null;
+      response_template?: string | null;
       headers?: string | null;
       url?: string | null;
       data?: string | null;
@@ -2507,6 +2520,7 @@ export interface components {
     Value: {
       id: string;
       name: string;
+      color_code?: string;
     };
     Webhook: CustomApiSchemas['Webhook'] & {
       readonly id: string;
@@ -2518,6 +2532,8 @@ export interface components {
       password?: string | null;
       authorization_header?: string | null;
       trigger_template?: string | null;
+      add_response_to_timeline?: boolean | null;
+      response_template?: string | null;
       headers?: string | null;
       url?: string | null;
       data?: string | null;

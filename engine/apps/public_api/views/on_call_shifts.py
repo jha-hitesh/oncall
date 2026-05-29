@@ -4,7 +4,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import ModelViewSet
 
-from apps.api.permissions import RBACPermission
+from apps.api.permissions import RBACPermission, get_schedule_management_write_permissions
 from apps.auth_token.auth import ApiTokenAuthentication, GrafanaServiceAccountAuthentication
 from apps.public_api.serializers import CustomOnCallShiftSerializer, CustomOnCallShiftUpdateSerializer
 from apps.public_api.throttlers.user_throttle import UserThrottle
@@ -22,10 +22,10 @@ class CustomOnCallShiftView(RateLimitHeadersMixin, UpdateSerializerMixin, ModelV
     rbac_permissions = {
         "list": [RBACPermission.Permissions.SCHEDULES_READ],
         "retrieve": [RBACPermission.Permissions.SCHEDULES_READ],
-        "create": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "partial_update": [RBACPermission.Permissions.SCHEDULES_WRITE],
-        "destroy": [RBACPermission.Permissions.SCHEDULES_WRITE],
+        "create": get_schedule_management_write_permissions,
+        "update": get_schedule_management_write_permissions,
+        "partial_update": get_schedule_management_write_permissions,
+        "destroy": get_schedule_management_write_permissions,
     }
 
     throttle_classes = [UserThrottle]

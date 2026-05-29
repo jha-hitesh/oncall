@@ -11,6 +11,7 @@ from django.utils import timezone
 from apps.slack.client import SlackClient
 from apps.slack.constants import BLOCK_SECTION_TEXT_MAX_SIZE
 from apps.slack.errors import (
+    SlackAPIAlreadyInChannelError,
     SlackAPIChannelArchivedError,
     SlackAPIError,
     SlackAPIFetchMembersFailedError,
@@ -19,6 +20,8 @@ from apps.slack.errors import (
     SlackAPITokenError,
 )
 from apps.slack.tasks import update_alert_group_slack_message
+
+from settings.base import FEATURE_SLACK_ADD_USER_BEFORE_TAGGING
 
 if typing.TYPE_CHECKING:
     from apps.alerts.models import AlertGroup
@@ -175,8 +178,8 @@ class SlackMessage(models.Model):
                 channel=channel_id,
                 text=text,
                 blocks=blocks,
-                thread_ts=slack_message.slack_id,
                 unfurl_links=True,
+                **alert_group.get_slack_follow_up_message_kwargs(),
             )
         except SlackAPIRatelimitError:
             UserNotificationPolicyLogRecord(
@@ -239,8 +242,62 @@ class SlackMessage(models.Model):
                     channel_members = sc.conversations_members(channel=channel_id)["members"]
                 except SlackAPIFetchMembersFailedError:
                     pass
-
+                
+                user_in_channel = True
                 if slack_user_identity.slack_id not in channel_members:
+                    user_in_channel = False
+                if not user_in_channel and FEATURE_SLACK_ADD_USER_BEFORE_TAGGING:
+                    try:
+                        sc.conversations_invite(channel=slack_message.channel.slack_id, users=slack_user_identity.slack_id)
+                        user_in_channel = True
+                    except SlackAPIAlreadyInChannelError:
+                        user_in_channel = True
+                    except SlackAPIRatelimitError:
+                        UserNotificationPolicyLogRecord.objects.create(
+                            author=user,
+                            type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_FAILED,
+                            notification_policy=notification_policy,
+                            alert_group=alert_group,
+                            reason="Slack API rate limit error while inviting user to channel",
+                            notification_step=notification_policy.step,
+                            notification_channel=notification_policy.notify_by,
+                            notification_error_code=UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_IN_SLACK_RATELIMIT,
+                        )
+                    except SlackAPITokenError:
+                        UserNotificationPolicyLogRecord.objects.create(
+                            author=user,
+                            type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_FAILED,
+                            notification_policy=notification_policy,
+                            alert_group=alert_group,
+                            reason="Slack token error while inviting user to channel",
+                            notification_step=notification_policy.step,
+                            notification_channel=notification_policy.notify_by,
+                            notification_error_code=UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_IN_SLACK_TOKEN_ERROR,
+                        )
+                    except SlackAPIChannelArchivedError:
+                        UserNotificationPolicyLogRecord.objects.create(
+                            author=user,
+                            type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_FAILED,
+                            notification_policy=notification_policy,
+                            alert_group=alert_group,
+                            reason="channel is archived",
+                            notification_step=notification_policy.step,
+                            notification_channel=notification_policy.notify_by,
+                            notification_error_code=UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_IN_SLACK_CHANNEL_IS_ARCHIVED,
+                        )
+                    except (SlackAPIError, SlackAPIMethodNotSupportedForChannelTypeError):
+                        UserNotificationPolicyLogRecord.objects.create(
+                            author=user,
+                            type=UserNotificationPolicyLogRecord.TYPE_PERSONAL_NOTIFICATION_FAILED,
+                            notification_policy=notification_policy,
+                            alert_group=alert_group,
+                            reason="User is not in Slack channel and could not be invited",
+                            notification_step=notification_policy.step,
+                            notification_channel=notification_policy.notify_by,
+                            notification_error_code=UserNotificationPolicyLogRecord.ERROR_NOTIFICATION_IN_SLACK_USER_NOT_IN_CHANNEL,
+                        )
+
+                if not user_in_channel:
                     time.sleep(5)  # 2 messages in the same moment are ratelimited by Slack. Dirty hack.
                     slack_user_identity.send_link_to_slack_message(slack_message)
         except (SlackAPITokenError, SlackAPIMethodNotSupportedForChannelTypeError):

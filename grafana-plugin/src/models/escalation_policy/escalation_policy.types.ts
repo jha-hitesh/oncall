@@ -25,6 +25,7 @@ export interface EscalationPolicy {
   num_alerts_in_window: number;
   num_minutes_in_window: number;
   severity: string | null;
+  invitees: string | null;
 }
 
 export interface EscalationPolicyOption {

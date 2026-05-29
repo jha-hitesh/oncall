@@ -1,5 +1,12 @@
 from django.conf import settings
 
+from .common import (
+    DEFAULT_GOOGLE_CALENDAR_DESCRIPTION_TEMPLATE,
+    DEFAULT_GOOGLE_CALENDAR_TITLE_TEMPLATE,
+    DEFAULT_SLACK_CHANNEL_PAYLOAD_TEMPLATE,
+    DEFAULT_SLACK_CREATE_CUSTOM_CHANNEL_TEMPLATE,
+)
+
 # Main
 enabled = True
 title = "Inbound Email"
@@ -22,6 +29,10 @@ slack_title = """\
 slack_message = "{{ payload.message }}"
 
 slack_image_url = "{{ payload.image_url }}"
+slack_create_custom_channel = DEFAULT_SLACK_CREATE_CUSTOM_CHANNEL_TEMPLATE
+slack_channel_payload = DEFAULT_SLACK_CHANNEL_PAYLOAD_TEMPLATE
+google_calendar_title = DEFAULT_GOOGLE_CALENDAR_TITLE_TEMPLATE
+google_calendar_description = DEFAULT_GOOGLE_CALENDAR_DESCRIPTION_TEMPLATE
 
 web_title = '{{ payload.get("subject", "Title undefined (check Web Title Template)") }}'
 

@@ -1,6 +1,6 @@
 {
   "extends": "./.config/tsconfig.json",
-  "include": ["src", "e2e-tests", "playwright.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json", "e2e-tests/**/*.ts", "playwright.config.ts"],
   "types": ["node", "@emotion/core"],
   "compilerOptions": {
     "composite": true,

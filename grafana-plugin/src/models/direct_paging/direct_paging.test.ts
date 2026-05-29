@@ -118,7 +118,13 @@ describe('DirectPagingStore', () => {
 
   test('createManualAlertRule makes the proper API call and returns the response', async () => {
     const directPagingStore = generateStore();
-    const mockedRequest = { team: '12345', users: [{ id: 'asdfadf', important: true }] };
+    const mockedRequest = {
+      team: '12345',
+      users: [{ id: 'asdfadf', important: true }],
+      message: 'Need help',
+      detailed_description: 'Checkout API latency is above SLO',
+      dynamic_labels_map: { service: 'checkout' },
+    };
     const mockedResponse = { alert_group_id: '123' };
 
     makeRequest.mockResolvedValueOnce(mockedResponse);
@@ -135,7 +141,13 @@ describe('DirectPagingStore', () => {
   test('updateAlertGroup makes the proper API call and returns the response', async () => {
     const directPagingStore = generateStore();
     const alertGroupId = '134';
-    const mockedRequest = { team: '12345', users: [{ id: 'asdfadf', important: true }] };
+    const mockedRequest = {
+      team: '12345',
+      users: [{ id: 'asdfadf', important: true }],
+      message: 'Need help',
+      detailed_description: 'Checkout API latency is above SLO',
+      dynamic_labels_map: { service: 'checkout' },
+    };
     const mockedResponse = { alert_group_id: alertGroupId };
 
     makeRequest.mockResolvedValueOnce(mockedResponse);
@@ -148,6 +160,57 @@ describe('DirectPagingStore', () => {
       data: {
         alert_group_id: alertGroupId,
         ...mockedRequest,
+      },
+    });
+  });
+
+  test('fetchTeamDirectPagingLabels loads labels from the team direct paging integration', async () => {
+    const directPagingStore = generateStore();
+    makeRequest.mockResolvedValueOnce([
+      {
+        labels: [
+          {
+            key: { id: 'team-key', name: 'team', prescribed: true },
+            value: { id: 'team-value', name: 'platform', prescribed: true },
+          },
+        ],
+        alert_group_labels: {
+          custom: [
+            {
+              key: { id: 'service-key', name: 'service', prescribed: true },
+              value: { id: 'service-value', name: 'checkout', prescribed: true },
+            },
+            {
+              key: { id: 'severity-key', name: 'severity', prescribed: true },
+              value: { id: null, name: '{{ payload.dynamic_labels_map.severity }}', prescribed: false },
+            },
+          ],
+        },
+      },
+    ]);
+
+    await expect(directPagingStore.fetchTeamDirectPagingLabels('team-1')).resolves.toEqual({
+      integrationLabels: [
+        {
+          key: { id: 'team-key', name: 'team', prescribed: true },
+          value: { id: 'team-value', name: 'platform', prescribed: true },
+        },
+      ],
+      alertGroupStaticLabels: [
+        {
+          key: { id: 'service-key', name: 'service', prescribed: true },
+          value: { id: 'service-value', name: 'checkout', prescribed: true },
+        },
+      ],
+      dynamicLabels: [{ id: 'severity-key', name: 'severity', prescribed: true }],
+    });
+
+    expect(makeRequest).toHaveBeenCalledWith('/alert_receive_channels/', {
+      method: 'GET',
+      params: {
+        integration: ['direct_paging'],
+        team: ['team-1'],
+        skip_pagination: 'true',
       },
     });
   });

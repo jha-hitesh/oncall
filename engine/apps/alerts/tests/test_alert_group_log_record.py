@@ -173,3 +173,151 @@ def test_log_record_webhook_link(
     log_data = log.render_log_line_json()
     webhook_data = log_data.get("webhook")
     assert webhook_data == {"pk": webhook.public_primary_key, "title": webhook.name}
+
+
+@pytest.mark.django_db
+def test_log_record_webhook_response_message(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_custom_webhook,
+):
+    organization, _ = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    webhook = make_custom_webhook(organization, name="Webhook name")
+
+    log = alert_group.log_records.create(
+        type=AlertGroupLogRecord.TYPE_CUSTOM_WEBHOOK_TRIGGERED,
+        reason='{"status": "ok"}',
+        step_specific_info={
+            "webhook_id": webhook.public_primary_key,
+            "webhook_name": webhook.name,
+            "response_log": True,
+        },
+    )
+
+    assert log.rendered_log_line_action() == 'outgoing webhook `Webhook name` response: {"status": "ok"}'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "for_slack, html, substitute_with_tag, expected",
+    [
+        (
+            True,
+            False,
+            False,
+            'completed step "Create Calender Invite for current escalation chain members" with response: summary INC-1234 War Room and meet link https://meet.google.com/abc-defg-hij',
+        ),
+        (
+            False,
+            True,
+            False,
+            'completed step "Create Calender Invite for current escalation chain members" with response: summary INC-1234 War Room and meet link https://meet.google.com/abc-defg-hij',
+        ),
+        (
+            False,
+            False,
+            True,
+            'completed step "Create Calender Invite for current escalation chain members" with response: summary INC-1234 War Room and meet link https://meet.google.com/abc-defg-hij',
+        ),
+    ],
+)
+def test_log_record_calendar_invite_completion_message(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_escalation_chain,
+    make_channel_filter,
+    make_escalation_policy,
+    for_slack,
+    html,
+    substitute_with_tag,
+    expected,
+):
+    organization, _ = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    escalation_chain = make_escalation_chain(organization, name="Escalation name")
+    channel_filter = make_channel_filter(alert_receive_channel, escalation_chain=escalation_chain)
+    escalation_policy = make_escalation_policy(
+        escalation_chain=channel_filter.escalation_chain,
+        escalation_policy_step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+    )
+
+    log = alert_group.log_records.create(
+        type=AlertGroupLogRecord.TYPE_ESCALATION_FINISHED,
+        step_specific_info={
+            "invitees": "current escalation chain members",
+            "google_calendar_event_title": "INC-1234 War Room",
+            "google_calendar_event_link": "https://calendar.google.com/event",
+            "google_calendar_meet_link": "https://meet.google.com/abc-defg-hij",
+        },
+        escalation_policy=escalation_policy,
+    )
+
+    log_line = log.rendered_log_line_action(for_slack=for_slack, html=html, substitute_with_tag=substitute_with_tag)
+    assert expected in log_line
+
+    log_data = log.render_log_line_json()
+    assert (
+        log_data["action"]
+        == 'completed step "Create Calender Invite for current escalation chain members" with response: summary INC-1234 War Room and meet link https://meet.google.com/abc-defg-hij'
+    )
+    assert log_data["google_calendar_event_link"] == {
+        "title": "INC-1234 War Room",
+        "url": "https://calendar.google.com/event",
+    }
+
+
+@pytest.mark.django_db
+def test_log_record_slack_channel_created_message(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+):
+    organization, slack_team_identity = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+
+    log = alert_group.log_records.create(
+        type=AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED,
+        step_specific_info={
+            "slack_channel_name": "disk-full",
+            "slack_channel_id": "C123",
+            "slack_team_id": slack_team_identity.slack_id,
+            "slack_channel_reused": False,
+        },
+    )
+
+    assert log.rendered_log_line_action() == "created slack channel #disk-full"
+    assert log.rendered_log_line_action(substitute_with_tag=True) == "created slack channel {{slack_channel}}"
+    assert log.render_log_line_json()["slack_channel"] == {
+        "title": "#disk-full",
+        "url": f"https://app.slack.com/client/{slack_team_identity.slack_id}/C123",
+    }
+
+
+@pytest.mark.django_db
+def test_log_record_slack_channel_reused_message(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+):
+    organization, slack_team_identity = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+
+    log = alert_group.log_records.create(
+        type=AlertGroupLogRecord.TYPE_SLACK_CHANNEL_CREATED,
+        step_specific_info={
+            "slack_channel_name": "disk-full",
+            "slack_channel_id": "C123",
+            "slack_team_id": slack_team_identity.slack_id,
+            "slack_channel_reused": True,
+        },
+    )
+
+    assert log.rendered_log_line_action() == "reused channel #disk-full"
+    assert log.rendered_log_line_action(substitute_with_tag=True) == "reused channel {{slack_channel}}"

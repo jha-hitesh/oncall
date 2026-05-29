@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.test import APIClient
 
 from apps.api.permissions import LegacyAccessControlRole
-from apps.api.views.webhooks import RECENT_RESPONSE_LIMIT, WEBHOOK_URL
+from apps.api.views.webhooks import RECENT_RESPONSE_LIMIT, WEBHOOK_RESPONSE_TEMPLATE, WEBHOOK_URL
 from apps.webhooks.models import Webhook
 from apps.webhooks.models.webhook import WEBHOOK_FIELD_PLACEHOLDER
 
@@ -52,6 +52,7 @@ def test_get_list_webhooks(webhook_internal_api_setup, make_custom_webhook, make
             "password": WEBHOOK_FIELD_PLACEHOLDER,
             "authorization_header": WEBHOOK_FIELD_PLACEHOLDER,
             "forward_all": False,
+            "add_response_to_timeline": False,
             "headers": None,
             "http_method": "POST",
             "integration_filter": [],
@@ -69,6 +70,7 @@ def test_get_list_webhooks(webhook_internal_api_setup, make_custom_webhook, make
                 "event_data": "",
             },
             "trigger_template": None,
+            "response_template": None,
             "trigger_type": "0",
             "trigger_type_name": "Manual or escalation step",
             "preset": None,
@@ -96,6 +98,7 @@ def test_get_detail_webhook(webhook_internal_api_setup, make_user_auth_headers):
         "password": WEBHOOK_FIELD_PLACEHOLDER,
         "authorization_header": WEBHOOK_FIELD_PLACEHOLDER,
         "forward_all": False,
+        "add_response_to_timeline": False,
         "headers": None,
         "http_method": "POST",
         "integration_filter": [],
@@ -113,6 +116,7 @@ def test_get_detail_webhook(webhook_internal_api_setup, make_user_auth_headers):
             "event_data": "",
         },
         "trigger_template": None,
+        "response_template": None,
         "trigger_type": "0",
         "trigger_type_name": "Manual or escalation step",
         "preset": None,
@@ -144,6 +148,7 @@ def test_get_detail_connected_integration_webhook(
         "password": None,
         "authorization_header": None,
         "forward_all": True,
+        "add_response_to_timeline": False,
         "headers": None,
         "http_method": "POST",
         "integration_filter": [],
@@ -161,6 +166,7 @@ def test_get_detail_connected_integration_webhook(
             "event_data": "",
         },
         "trigger_template": None,
+        "response_template": None,
         "trigger_type": "0",
         "trigger_type_name": "Manual or escalation step",
         "preset": None,
@@ -193,6 +199,7 @@ def test_create_webhook(webhook_internal_api_setup, make_user_auth_headers):
         "password": None,
         "authorization_header": None,
         "forward_all": True,
+        "add_response_to_timeline": False,
         "headers": None,
         "http_method": "POST",
         "integration_filter": [],
@@ -210,6 +217,7 @@ def test_create_webhook(webhook_internal_api_setup, make_user_auth_headers):
             "event_data": "",
         },
         "trigger_template": None,
+        "response_template": None,
         "trigger_type": str(data["trigger_type"]),
         "trigger_type_name": "Alert Group Created",
         "preset": None,
@@ -270,6 +278,8 @@ def test_create_valid_templated_field(webhook_internal_api_setup, make_user_auth
             "url": "",
             "event_data": "",
         },
+        "add_response_to_timeline": False,
+        "response_template": None,
         "trigger_template": None,
         "trigger_type": str(data["trigger_type"]),
         "trigger_type_name": "Alert Group Created",
@@ -666,22 +676,23 @@ def test_get_webhook_responses(
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "test_template, test_payload, expected_result",
+    "template_name, test_template, test_payload, expected_result",
     [
-        ("https://test.com", None, "https://test.com"),
-        ("https://test.com", "", "https://test.com"),
-        ("{{ name }}", {"name": "test_1"}, "test_1"),
-        ("{{ name }}", '{"name": "test_1"}', "test_1"),
+        (WEBHOOK_URL, "https://test.com", None, "https://test.com"),
+        (WEBHOOK_URL, "https://test.com", "", "https://test.com"),
+        (WEBHOOK_URL, "{{ name }}", {"name": "test_1"}, "test_1"),
+        (WEBHOOK_URL, "{{ name }}", '{"name": "test_1"}', "test_1"),
+        (WEBHOOK_RESPONSE_TEMPLATE, "{{ webhook_response }}", {"webhook_response": "ok"}, "ok"),
     ],
 )
 def test_webhook_preview_template(
-    webhook_internal_api_setup, make_user_auth_headers, test_template, test_payload, expected_result
+    webhook_internal_api_setup, make_user_auth_headers, template_name, test_template, test_payload, expected_result
 ):
     user, token, webhook = webhook_internal_api_setup
     client = APIClient()
     url = reverse("api-internal:webhooks-preview-template", kwargs={"pk": webhook.public_primary_key})
     data = {
-        "template_name": WEBHOOK_URL,
+        "template_name": template_name,
         "template_body": test_template,
         "payload": test_payload,
     }
@@ -733,6 +744,8 @@ def test_webhook_field_masking(webhook_internal_api_setup, make_user_auth_header
             "url": "",
             "event_data": "",
         },
+        "add_response_to_timeline": False,
+        "response_template": None,
         "trigger_template": None,
         "trigger_type": str(data["trigger_type"]),
         "trigger_type_name": "Alert Group Created",
@@ -793,6 +806,8 @@ def test_webhook_copy(webhook_internal_api_setup, make_user_auth_headers):
             "url": "",
             "event_data": "",
         },
+        "add_response_to_timeline": False,
+        "response_template": None,
         "trigger_template": None,
         "trigger_type": str(data["trigger_type"]),
         "trigger_type_name": "Alert Group Created",
@@ -1098,11 +1113,14 @@ def test_create_webhook_with_labels(
             "url": "",
             "event_data": "",
         },
+        "add_response_to_timeline": False,
+        "response_template": None,
         "trigger_template": None,
         "trigger_type": str(data["trigger_type"]),
         "trigger_type_name": "Alert Group Created",
         "preset": None,
     }
+    expected_response["labels"] = response.json()["labels"]
     assert response.status_code == status.HTTP_201_CREATED
     assert response.json() == expected_response
 

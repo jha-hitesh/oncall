@@ -97,14 +97,18 @@ def test_direct_paging_team(make_organization, make_team, make_user_for_organiza
     source_url = "https://www.example.com"
     title = f"{from_author_username} is paging {team.name} to join escalation"
     msg = "Fire"
+    detailed_description = "Database writes are timing out intermittently."
+    dynamic_labels_map = {"service": "checkout", "severity": "critical"}
 
     direct_paging(
         organization,
         from_user,
         msg,
+        detailed_description=detailed_description,
         source_url=source_url,
         team=team,
         important_team_escalation=important_team_escalation,
+        dynamic_labels_map=dynamic_labels_map,
     )
 
     # alert group created
@@ -119,11 +123,13 @@ def test_direct_paging_team(make_organization, make_team, make_user_for_organiza
         "oncall": {
             "title": title,
             "message": msg,
+            "detailed_description": detailed_description,
             "uid": ANY,
             "author_username": from_author_username,
             "permalink": source_url,
             "important": important_team_escalation,
         },
+        "dynamic_labels_map": dynamic_labels_map,
     }
 
     assert ag.channel.verbal_name == f"Direct paging ({team.name} team)"
@@ -346,7 +352,14 @@ def test_direct_paging_title_and_message_are_html_escaped(make_organization, mak
     from_user = make_user_for_organization(organization)
     other_user = make_user_for_organization(organization)
 
-    direct_paging(organization, from_user, dirty_input, dirty_input, users=[(other_user, False)])
+    direct_paging(
+        organization,
+        from_user,
+        dirty_input,
+        dirty_input,
+        detailed_description=dirty_input,
+        users=[(other_user, False)],
+    )
 
     # alert group created
     alert_groups = AlertGroup.objects.all()
@@ -357,3 +370,4 @@ def test_direct_paging_title_and_message_are_html_escaped(make_organization, mak
     assert ag.web_title_cache == clean_input
     assert alert.title == clean_input
     assert alert.message == clean_input
+    assert alert.raw_request_data["oncall"]["detailed_description"] == clean_input

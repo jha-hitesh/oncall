@@ -49,6 +49,8 @@ function prepareDataForEdit(
       preset: selectedPreset?.id,
       http_method: 'POST',
       forward_all: true,
+      add_response_to_timeline: false,
+      response_template: null,
       labels: [],
     };
   } else if (action === WebhookFormActionType.COPY) {
@@ -66,6 +68,10 @@ function prepareForSave(rawData: Partial<ApiSchemas['Webhook']>, selectedPreset:
 
   if (data.forward_all) {
     data.data = null;
+  }
+
+  if (!data.add_response_to_timeline) {
+    data.response_template = null;
   }
 
   return data;

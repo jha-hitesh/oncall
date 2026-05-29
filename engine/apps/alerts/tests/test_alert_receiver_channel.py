@@ -302,6 +302,26 @@ def test_create_missing_direct_paging_integrations(
     mock_metrics_add_integrations_to_cache.assert_called_once()
 
 
+@patch("apps.alerts.models.alert_receive_channel.metrics_add_integrations_to_cache")
+@pytest.mark.django_db
+def test_create_missing_direct_paging_integrations_feature_disabled(
+    mock_metrics_add_integrations_to_cache,
+    settings,
+    make_organization,
+    make_team,
+):
+    settings.FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS = False
+    organization = make_organization()
+
+    make_team(organization)
+    make_team(organization)
+
+    AlertReceiveChannel.objects.create_missing_direct_paging_integrations(organization)
+
+    assert organization.alert_receive_channels.count() == 0
+    mock_metrics_add_integrations_to_cache.assert_not_called()
+
+
 @pytest.mark.django_db
 def test_create_duplicate_direct_paging_integrations(make_organization, make_team, make_alert_receive_channel):
     """Check that it's not possible to have more than one active direct paging integration per team."""

@@ -1,7 +1,9 @@
 export enum AppFeature {
   Slack = 'slack',
+  SlackChannelCreation = 'slack_channel_creation',
   UnifiedSlack = 'unified_slack',
   Telegram = 'telegram',
+  Email = 'email',
   LiveSettings = 'live_settings',
   CloudNotifications = 'grafana_cloud_notifications',
   CloudConnection = 'grafana_cloud_connection',
@@ -10,4 +12,5 @@ export enum AppFeature {
   GoogleOauth2 = 'google_oauth2',
   PersonalWebhook = 'personal_webhook',
   Mattermost = 'mattermost',
+  AllowDirectPagingCreation = 'allow_direct_paging_creation',
 }

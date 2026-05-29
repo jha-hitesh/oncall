@@ -157,7 +157,7 @@ export const UserSettings = observer(({ id, onHide, tab = UserSettingsTab.UserIn
     isCurrent && organizationStore.currentOrganization?.slack_team_identity && !storeUser.slack_user_identity,
     isCurrent && store.hasFeature(AppFeature.Telegram) && !storeUser.telegram_configuration,
     isCurrent && store.hasFeature(AppFeature.PersonalWebhook),
-    isCurrent,
+    isCurrent && store.hasFeature(AppFeature.CloudConnection),
     store.hasFeature(AppFeature.MsTeams) && !storeUser.messaging_backends.MSTEAMS,
     isCurrent && store.hasFeature(AppFeature.GoogleOauth2),
     isCurrent && store.hasFeature(AppFeature.Mattermost) && !storeUser.messaging_backends.MATTERMOST,

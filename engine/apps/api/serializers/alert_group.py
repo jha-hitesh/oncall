@@ -11,6 +11,12 @@ from rest_framework import serializers
 from apps.alerts.incident_appearance.renderers.web_renderer import AlertGroupWebRenderer
 from apps.alerts.models import AlertGroup
 from apps.alerts.models.alert_group import PagedUser
+from apps.labels.models import (
+    LabelKeyCache,
+    LabelValueCache,
+    get_default_label_key_color_code,
+    get_default_label_value_color_code,
+)
 from apps.slack.models import SlackMessage
 from apps.telegram.models import TelegramMessage
 from common.api_helpers.custom_fields import TeamPrimaryKeyRelatedField
@@ -79,16 +85,49 @@ class AlertGroupFieldsCacheSerializerMixin(AlertsFieldCacheBusterMixin):
 
 
 class AlertGroupLabelSerializer(serializers.Serializer):
-    class KeySerializer(serializers.Serializer):
-        id = serializers.CharField(source="key_name")
-        name = serializers.CharField(source="key_name")
+    key = serializers.SerializerMethodField()
+    value = serializers.SerializerMethodField()
 
-    class ValueSerializer(serializers.Serializer):
-        id = serializers.CharField(source="value_name")
-        name = serializers.CharField(source="value_name")
+    def _get_cache(self, cache_name: str) -> dict:
+        return self.context.setdefault(cache_name, {})
 
-    key = KeySerializer(source="*")
-    value = ValueSerializer(source="*")
+    def _get_key_color_code(self, obj) -> str:
+        key_cache = self._get_cache("_alert_group_label_key_color_cache")
+        cache_key = (obj.organization_id, obj.key_name)
+
+        if cache_key not in key_cache:
+            key_cache[cache_key] = (
+                LabelKeyCache.objects.filter(organization_id=obj.organization_id, name=obj.key_name)
+                .values_list("color_code", flat=True)
+                .first()
+                or get_default_label_key_color_code()
+            )
+
+        return key_cache[cache_key]
+
+    def _get_value_color_code(self, obj) -> str:
+        value_cache = self._get_cache("_alert_group_label_value_color_cache")
+        cache_key = (obj.organization_id, obj.key_name, obj.value_name)
+
+        if cache_key not in value_cache:
+            value_cache[cache_key] = (
+                LabelValueCache.objects.filter(
+                    key__organization_id=obj.organization_id,
+                    key__name=obj.key_name,
+                    name=obj.value_name,
+                )
+                .values_list("color_code", flat=True)
+                .first()
+                or get_default_label_value_color_code()
+            )
+
+        return value_cache[cache_key]
+
+    def get_key(self, obj) -> dict[str, str]:
+        return {"id": obj.key_name, "name": obj.key_name, "color_code": self._get_key_color_code(obj)}
+
+    def get_value(self, obj) -> dict[str, str]:
+        return {"id": obj.value_name, "name": obj.value_name, "color_code": self._get_value_color_code(obj)}
 
 
 class ShortAlertGroupSerializer(AlertGroupFieldsCacheSerializerMixin, serializers.ModelSerializer):

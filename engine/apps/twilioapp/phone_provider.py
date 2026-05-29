@@ -2,6 +2,7 @@ import logging
 import urllib.parse
 from string import digits
 
+import requests
 from django.db.models import F, Q
 from phonenumbers import COUNTRY_CODE_TO_REGION_CODE
 from twilio.base.exceptions import TwilioRestException
@@ -17,7 +18,11 @@ from apps.phone_notifications.exceptions import (
     FailedToStartVerification,
 )
 from apps.phone_notifications.phone_provider import PhoneProvider, ProviderFlags
-from apps.twilioapp.gather import get_alert_group_gather_instructions, get_gather_url
+from apps.twilioapp.gather import (
+    get_alert_group_gather_instructions,
+    get_gather_url,
+    get_phone_call_wait_time_for_user_action,
+)
 from apps.twilioapp.models import (
     TwilioCallStatuses,
     TwilioPhoneCall,
@@ -27,7 +32,6 @@ from apps.twilioapp.models import (
     TwilioVerificationSender,
 )
 from apps.twilioapp.status_callback import get_call_status_callback_url, get_sms_status_callback_url
-
 logger = logging.getLogger(__name__)
 
 
@@ -169,7 +173,9 @@ class TwilioPhoneProvider(PhoneProvider):
 
     def _message_to_twiml_gather(self, message: str) -> VoiceResponse:
         response = VoiceResponse()
-        gather = Gather(action=get_gather_url(), method="POST", num_digits=1)
+        gather = Gather(
+            action=get_gather_url(), method="POST",
+            num_digits=1, timeout=get_phone_call_wait_time_for_user_action())
         gather.say(message)
         gather.pause(length=1)
         gather.say(get_alert_group_gather_instructions())
@@ -275,7 +281,16 @@ class TwilioPhoneProvider(PhoneProvider):
         return live_settings.TWILIO_NUMBER
 
     def _twilio_sender(self, sender_model, to):
-        _, _, country_code = self._parse_number(to)
+        try:
+            _, _, country_code = self._parse_number(to)
+        except requests.RequestException as e:
+            logger.warning(
+                "TwilioPhoneProvider._twilio_sender: failed to resolve sender country for %s, "
+                "falling back to default sender: %s",
+                to,
+                e,
+            )
+            country_code = None
         sender = (
             sender_model.objects.filter(Q(country_code=country_code) | Q(country_code__isnull=True))
             .order_by(F("country_code").desc(nulls_last=True))

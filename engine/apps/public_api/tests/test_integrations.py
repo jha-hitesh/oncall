@@ -1011,6 +1011,26 @@ def test_cant_create_integrations_direct_paging(
 
 
 @pytest.mark.django_db
+def test_can_create_integrations_direct_paging_when_feature_enabled(
+    settings, make_organization_and_user_with_token, make_team, make_alert_receive_channel, make_user_auth_headers
+):
+    settings.FEATURE_ALLOW_DIRECT_PAGING_CREATION = True
+    organization, _, token = make_organization_and_user_with_token()
+
+    client = APIClient()
+    url = reverse("api-public:integrations-list")
+    response = client.post(
+        url,
+        data={"type": "direct_paging", "name": "Direct paging from API"},
+        format="json",
+        HTTP_AUTHORIZATION=token,
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["type"] == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING
+
+
+@pytest.mark.django_db
 def test_update_integrations_direct_paging(
     make_organization_and_user_with_token, make_team, make_alert_receive_channel, make_user_auth_headers
 ):

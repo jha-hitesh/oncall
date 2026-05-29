@@ -2007,6 +2007,21 @@ class AlertGroup(AlertGroupSlackRenderingMixin, EscalationSnapshotMixin, models.
         except AttributeError:
             return self.slack_messages.order_by("created_at").first()
 
+    def get_slack_follow_up_message_kwargs(self) -> dict[str, str]:
+        """
+        Follow-up OnCall messages are threaded in shared channels, but should be posted as top-level
+        messages in channels dedicated to a single alert group.
+        """
+        slack_message = self.slack_message
+        if not slack_message:
+            return {}
+
+        slack_channel = slack_message.channel
+        if slack_channel and slack_channel.alert_group_id == self.pk:
+            return {}
+
+        return {"thread_ts": slack_message.slack_id}
+
     @cached_property
     def last_stop_escalation_log(self):
         from apps.alerts.models import AlertGroupLogRecord

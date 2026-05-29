@@ -50,3 +50,13 @@ class GoogleCalendarEvent(typing.TypedDict):
     """
     Title of the event
     """
+
+
+class GoogleCalendarEventAttendee(typing.TypedDict):
+    email: str
+
+
+class GoogleCalendarInsertResponse(typing.TypedDict, total=False):
+    id: str
+    htmlLink: str
+    hangoutLink: str

@@ -729,3 +729,13 @@ prometheus:
   #     static_configs:
   #       - targets:
   #         - oncall-dev-engine.default.svc.cluster.local:8080
+
+celery-flower:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+  celery:
+    brokerUrl: ""  # mandatory eg: redis://localhost:6379/0
+    resultBackend: "" # optional
+  ingress:
+    enabled: false

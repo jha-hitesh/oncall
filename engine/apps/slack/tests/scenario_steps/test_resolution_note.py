@@ -1,8 +1,10 @@
 import json
+from datetime import datetime, timezone as dt_timezone
 from unittest.mock import patch
 
 import pytest
 
+from apps.alerts.models import ResolutionNote
 from apps.slack.chatops_proxy_routing import make_value
 from apps.slack.client import SlackClient
 from apps.slack.constants import BLOCK_SECTION_TEXT_MAX_SIZE
@@ -152,7 +154,7 @@ def test_post_or_update_resolution_note_in_thread_truncate_message_text(
     alert_receive_channel = make_alert_receive_channel(organization)
     alert_group = make_alert_group(alert_receive_channel)
 
-    slack_channel = make_slack_channel(slack_team_identity)
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
     make_slack_message(slack_channel, alert_group=alert_group)
 
     resolution_note = make_resolution_note(alert_group=alert_group, author=user, message_text="a" * 3000)
@@ -188,7 +190,7 @@ def test_post_or_update_resolution_note_in_thread_update_truncate_message_text(
     alert_receive_channel = make_alert_receive_channel(organization)
     alert_group = make_alert_group(alert_receive_channel)
 
-    slack_channel = make_slack_channel(slack_team_identity)
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
     make_slack_message(slack_channel, alert_group=alert_group)
 
     resolution_note = make_resolution_note(alert_group=alert_group, author=user, message_text="a" * 3000)
@@ -318,7 +320,7 @@ def test_resolution_notes_modal_closed_before_update(
     alert_receive_channel = make_alert_receive_channel(organization)
     alert_group = make_alert_group(alert_receive_channel)
 
-    slack_channel = make_slack_channel(slack_team_identity)
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
     make_slack_message(slack_channel, alert_group=alert_group)
 
     payload = {
@@ -367,7 +369,7 @@ def test_add_to_resolution_note(
     alert_group = make_alert_group(alert_receive_channel)
     make_alert(alert_group=alert_group, raw_request_data={})
 
-    slack_channel = make_slack_channel(slack_team_identity)
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
     slack_message = make_slack_message(slack_channel, alert_group=alert_group)
 
     payload = {
@@ -391,6 +393,209 @@ def test_add_to_resolution_note(
     mock_update_alert_groups_message.assert_called_once_with(debounce=False)
 
     assert alert_group.resolution_notes.get().text == "Test resolution note"
+
+
+@patch("apps.slack.models.SlackMessage.update_alert_groups_message")
+@patch.object(SlackClient, "reactions_add")
+@patch.object(SlackClient, "chat_getPermalink", return_value={"permalink": "https://example.com"})
+@pytest.mark.django_db
+def test_add_to_resolution_note_from_im_event(
+    _mock_chat_getPermalink,
+    mock_reactions_add,
+    mock_update_alert_groups_message,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_dm_channel = make_slack_channel(
+        slack_team_identity, slack_id="D_RESOLUTION_NOTE", alert_group=alert_group
+    )
+    slack_message = make_slack_message(slack_dm_channel, alert_group=alert_group)
+
+    payload = {
+        "event": {
+            "type": "message",
+            "channel_type": "im",
+            "channel": slack_dm_channel.slack_id,
+            "text": "DM resolution note",
+            "ts": "im_message_ts",
+            "thread_ts": slack_message.slack_id,
+            "user": slack_user_identity.slack_id,
+        }
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    mock_reactions_add.assert_called_once_with(
+        channel=slack_dm_channel.slack_id,
+        name="memo",
+        timestamp="im_message_ts",
+    )
+    mock_update_alert_groups_message.assert_called_once_with(debounce=False)
+
+    resolution_note_message = alert_group.resolution_note_slack_messages.get(ts="im_message_ts")
+    assert resolution_note_message.thread_ts == slack_message.slack_id
+    assert resolution_note_message.text == "DM resolution note"
+    assert alert_group.resolution_notes.get().text == "DM resolution note"
+
+
+@patch("apps.slack.models.SlackMessage.update_alert_groups_message")
+@patch.object(SlackClient, "reactions_add")
+@patch.object(SlackClient, "chat_getPermalink", return_value={"permalink": "https://example.com"})
+@pytest.mark.django_db
+def test_add_to_resolution_note_uses_original_slack_ts_when_feature_enabled(
+    _mock_chat_getPermalink,
+    mock_reactions_add,
+    mock_update_alert_groups_message,
+    settings,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+):
+    settings.FEATURE_SLACK_USE_ORIGINAL_TS_IN_RESOLUTION_NOTE = True
+
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+    slack_ts = "1710000000.123456"
+
+    payload = {
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": slack_ts,
+        "message": {
+            "type": "message",
+            "text": "Test resolution note",
+            "ts": slack_ts,
+            "thread_ts": slack_message.slack_id,
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    resolution_note = alert_group.resolution_notes.get()
+
+    mock_reactions_add.assert_called_once()
+    mock_update_alert_groups_message.assert_called_once_with(debounce=False)
+    assert resolution_note.created_at == datetime.fromtimestamp(float(slack_ts), tz=dt_timezone.utc)
+
+
+@patch("apps.slack.models.SlackMessage.update_alert_groups_message")
+@patch.object(SlackClient, "reactions_add")
+@patch.object(SlackClient, "chat_getPermalink", return_value={"permalink": "https://example.com"})
+@pytest.mark.django_db
+def test_add_to_resolution_note_keeps_creation_time_when_feature_disabled(
+    _mock_chat_getPermalink,
+    mock_reactions_add,
+    mock_update_alert_groups_message,
+    settings,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+):
+    settings.FEATURE_SLACK_USE_ORIGINAL_TS_IN_RESOLUTION_NOTE = False
+
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+    slack_ts = "1710000000.123456"
+
+    payload = {
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": slack_ts,
+        "message": {
+            "type": "message",
+            "text": "Test resolution note",
+            "ts": slack_ts,
+            "thread_ts": slack_message.slack_id,
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    resolution_note = alert_group.resolution_notes.get()
+
+    mock_reactions_add.assert_called_once()
+    mock_update_alert_groups_message.assert_called_once_with(debounce=False)
+    assert resolution_note.created_at != datetime.fromtimestamp(float(slack_ts), tz=dt_timezone.utc)
+
+
+@patch.object(ScenarioStep, "open_warning_window")
+@pytest.mark.django_db
+def test_add_to_resolution_note_self_bot_message_with_matching_app_id_opens_warning(
+    mock_open_warning_window,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    slack_team_identity.cached_app_id = "A_SELF_BOT"
+    slack_team_identity.save(update_fields=["cached_app_id"])
+
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+
+    payload = {
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "random_ts",
+        "message": {
+            "type": "message",
+            "subtype": "bot_message",
+            "text": "Self bot resolution note",
+            "ts": "random_ts",
+            "thread_ts": slack_message.slack_id,
+            "app_id": "A_SELF_BOT",
+            "user": "U_EXTERNAL_BOT",
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    mock_open_warning_window.assert_called_once_with(
+        payload, "Unable to add self posted message to resolution note."
+    )
+    assert alert_group.resolution_notes.count() == 0
 
 
 @pytest.mark.django_db
@@ -435,7 +640,7 @@ def test_add_to_resolution_note_deleted_org(
     alert_group = make_alert_group(alert_receive_channel)
     make_alert(alert_group=alert_group, raw_request_data={})
 
-    slack_channel = make_slack_channel(slack_team_identity)
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
     slack_message = make_slack_message(slack_channel, alert_group=alert_group)
     organization.delete()
 
@@ -463,3 +668,313 @@ def test_add_to_resolution_note_deleted_org(
         step.process_scenario(slack_user_identity, slack_team_identity, payload)
 
     mock_api_call.assert_not_called()  # no Slack API calls should be made
+
+
+@patch("apps.slack.models.SlackMessage.update_alert_groups_message")
+@patch.object(SlackClient, "reactions_add")
+@patch.object(SlackClient, "chat_getPermalink", return_value={"permalink": "https://example.com"})
+@pytest.mark.django_db
+def test_add_to_resolution_note_from_channel_message_uses_last_channel_alert_group(
+    _mock_chat_getPermalink,
+    mock_reactions_add,
+    mock_update_alert_groups_message,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    anchor_message = make_slack_message(slack_channel, alert_group=alert_group)
+
+    payload = {
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "channel_message_ts",
+        "message": {
+            "type": "message",
+            "text": "Channel resolution note",
+            "ts": "channel_message_ts",
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    mock_reactions_add.assert_called_once_with(
+        channel=slack_channel.slack_id,
+        name="memo",
+        timestamp="channel_message_ts",
+    )
+    mock_update_alert_groups_message.assert_called_once_with(debounce=False)
+
+    resolution_note_message = alert_group.resolution_note_slack_messages.get(ts="channel_message_ts")
+    assert resolution_note_message.thread_ts == anchor_message.slack_id
+    assert resolution_note_message.text == "Channel resolution note"
+    assert alert_group.resolution_notes.get().text == "Channel resolution note"
+
+
+@patch.object(ScenarioStep, "open_warning_window")
+@pytest.mark.django_db
+def test_add_to_resolution_note_from_channel_message_with_message_alert_group_but_unlinked_channel_opens_warning(
+    mock_open_warning_window,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=None)
+    make_slack_message(slack_channel, alert_group=alert_group)
+
+    payload = {
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "channel_message_ts",
+        "message": {
+            "type": "message",
+            "text": "Channel resolution note",
+            "ts": "channel_message_ts",
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    mock_open_warning_window.assert_called_once_with(payload, "Current channel is not attached to any alert group")
+
+
+@patch.object(ScenarioStep, "open_warning_window")
+@pytest.mark.django_db
+def test_add_to_resolution_note_from_channel_message_without_alert_group_channel_opens_warning(
+    mock_open_warning_window,
+    make_organization_and_user_with_slack_identities,
+    make_slack_channel,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    slack_channel = make_slack_channel(slack_team_identity)
+
+    payload = {
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "channel_message_ts",
+        "message": {
+            "type": "message",
+            "text": "Channel resolution note",
+            "ts": "channel_message_ts",
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    AddToResolutionNoteStep = ScenarioStep.get_step("resolution_note", "AddToResolutionNoteStep")
+    step = AddToResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    mock_open_warning_window.assert_called_once_with(payload, "Current channel is not attached to any alert group")
+
+
+@patch("apps.slack.models.SlackMessage.update_alert_groups_message")
+@patch.object(SlackClient, "reactions_remove")
+@pytest.mark.django_db
+def test_remove_from_resolution_note(
+    mock_reactions_remove,
+    mock_update_alert_groups_message,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+    make_resolution_note_slack_message,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+    resolution_note_message = make_resolution_note_slack_message(
+        alert_group=alert_group,
+        user=user,
+        added_by_user=user,
+        slack_channel=slack_channel,
+        ts="random_ts",
+        thread_ts=slack_message.slack_id,
+        text="Test resolution note",
+        added_to_resolution_note=True,
+    )
+    resolution_note = ResolutionNote.create_from_slack_message(alert_group, resolution_note_message)
+
+    payload = {
+        "type": "message_action",
+        "callback_id": "remove_resolution_note",
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "random_ts",
+        "message": {
+            "type": "message",
+            "text": "Test resolution note",
+            "ts": "random_ts",
+            "thread_ts": slack_message.slack_id,
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    RemoveFromResolutionNoteStep = ScenarioStep.get_step("resolution_note", "RemoveFromResolutionNoteStep")
+    step = RemoveFromResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    resolution_note_message.refresh_from_db()
+    resolution_note.refresh_from_db()
+
+    assert resolution_note_message.added_to_resolution_note is False
+    assert resolution_note.deleted_at is not None
+    mock_reactions_remove.assert_called_once_with(
+        channel=slack_channel.slack_id,
+        name="memo",
+        timestamp="random_ts",
+    )
+    mock_update_alert_groups_message.assert_called_once_with(debounce=False)
+
+
+@patch("apps.slack.models.SlackMessage.update_alert_groups_message")
+@patch.object(SlackClient, "reactions_remove")
+@pytest.mark.django_db
+def test_remove_from_resolution_note_without_step_organization(
+    mock_reactions_remove,
+    mock_update_alert_groups_message,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+    make_resolution_note_slack_message,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+    resolution_note_message = make_resolution_note_slack_message(
+        alert_group=alert_group,
+        user=user,
+        added_by_user=user,
+        slack_channel=slack_channel,
+        ts="random_ts",
+        thread_ts=slack_message.slack_id,
+        text="Test resolution note",
+        added_to_resolution_note=True,
+    )
+    resolution_note = ResolutionNote.create_from_slack_message(alert_group, resolution_note_message)
+
+    payload = {
+        "type": "message_action",
+        "callback_id": "remove_resolution_note",
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "random_ts",
+        "message": {
+            "type": "message",
+            "text": "Test resolution note",
+            "ts": "random_ts",
+            "thread_ts": slack_message.slack_id,
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    RemoveFromResolutionNoteStep = ScenarioStep.get_step("resolution_note", "RemoveFromResolutionNoteStep")
+    step = RemoveFromResolutionNoteStep(user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    resolution_note_message.refresh_from_db()
+    resolution_note.refresh_from_db()
+
+    assert resolution_note_message.added_to_resolution_note is False
+    assert resolution_note.deleted_at is not None
+    mock_reactions_remove.assert_called_once_with(
+        channel=slack_channel.slack_id,
+        name="memo",
+        timestamp="random_ts",
+    )
+    mock_update_alert_groups_message.assert_called_once_with(debounce=False)
+
+
+@patch.object(ScenarioStep, "open_warning_window")
+@pytest.mark.django_db
+def test_remove_from_resolution_note_last_required_opens_warning(
+    mock_open_warning_window,
+    make_organization_and_user_with_slack_identities,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_alert,
+    make_slack_message,
+    make_slack_channel,
+    make_resolution_note_slack_message,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    organization.is_resolution_note_required = True
+    organization.save(update_fields=["is_resolution_note_required"])
+
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    alert_group.resolved = True
+    alert_group.save(update_fields=["resolved"])
+    make_alert(alert_group=alert_group, raw_request_data={})
+
+    slack_channel = make_slack_channel(slack_team_identity, alert_group=alert_group)
+    slack_message = make_slack_message(slack_channel, alert_group=alert_group)
+    resolution_note_message = make_resolution_note_slack_message(
+        alert_group=alert_group,
+        user=user,
+        added_by_user=user,
+        slack_channel=slack_channel,
+        ts="random_ts",
+        thread_ts=slack_message.slack_id,
+        text="Test resolution note",
+        added_to_resolution_note=True,
+    )
+    ResolutionNote.create_from_slack_message(alert_group, resolution_note_message)
+
+    payload = {
+        "type": "message_action",
+        "callback_id": "remove_resolution_note",
+        "channel": {"id": slack_channel.slack_id},
+        "message_ts": "random_ts",
+        "message": {
+            "type": "message",
+            "text": "Test resolution note",
+            "ts": "random_ts",
+            "thread_ts": slack_message.slack_id,
+            "user": slack_user_identity.slack_id,
+        },
+        "trigger_id": "random_trigger_id",
+    }
+
+    RemoveFromResolutionNoteStep = ScenarioStep.get_step("resolution_note", "RemoveFromResolutionNoteStep")
+    step = RemoveFromResolutionNoteStep(organization=organization, user=user, slack_team_identity=slack_team_identity)
+    step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    assert alert_group.resolution_notes.count() == 1
+    mock_open_warning_window.assert_called_once_with(
+        payload, "Unable to remove the last resolution note from a resolved incident."
+    )

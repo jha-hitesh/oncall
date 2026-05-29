@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from apps.slack.scenarios.manage_responders import ManageRespondersUserChange
 from apps.slack.scenarios.paging import OnPagingTeamChange, StartDirectPaging
+from apps.slack.scenarios.resolution_note import AddToResolutionNoteStep, RemoveFromResolutionNoteStep
 from apps.slack.scenarios.schedules import EditScheduleShiftNotifyStep
 from apps.slack.scenarios.shift_swap_requests import AcceptShiftSwapRequestStep
 from apps.slack.types import PayloadType
@@ -266,6 +267,71 @@ def test_organization_not_found_scenario_doesnt_break_edit_schedule_notification
 
     assert response.status_code == status.HTTP_200_OK
     mock_edit_schedule_notifications.assert_called_once()
+
+
+@patch("apps.slack.views.SlackEventApiEndpointView.verify_signature", return_value=True)
+@patch.object(AddToResolutionNoteStep, "process_scenario")
+@pytest.mark.django_db
+def test_message_im_event_routes_to_add_to_resolution_note(
+    mock_process_scenario,
+    _mock_verify_signature,
+    make_organization,
+    make_slack_user_identity,
+    make_user,
+    slack_team_identity,
+):
+    organization = make_organization(slack_team_identity=slack_team_identity)
+    slack_user_identity = make_slack_user_identity(slack_team_identity=slack_team_identity, slack_id=SLACK_USER_ID)
+    make_user(organization=organization, slack_user_identity=slack_user_identity)
+
+    response = _make_request(
+        {
+            "type": PayloadType.EVENT_CALLBACK,
+            "team_id": SLACK_TEAM_ID,
+            "event": {
+                "type": "message",
+                "channel_type": "im",
+                "channel": "D12345",
+                "user": SLACK_USER_ID,
+                "text": "resolution note from dm",
+                "ts": "1710000000.000001",
+            },
+        }
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_process_scenario.assert_called_once()
+
+
+@patch("apps.slack.views.SlackEventApiEndpointView.verify_signature", return_value=True)
+@patch.object(RemoveFromResolutionNoteStep, "process_scenario")
+@pytest.mark.django_db
+def test_message_action_routes_to_remove_from_resolution_note(
+    mock_process_scenario,
+    _mock_verify_signature,
+    make_organization,
+    make_slack_user_identity,
+    make_user,
+    slack_team_identity,
+):
+    organization = make_organization(slack_team_identity=slack_team_identity)
+    slack_user_identity = make_slack_user_identity(slack_team_identity=slack_team_identity, slack_id=SLACK_USER_ID)
+    make_user(organization=organization, slack_user_identity=slack_user_identity)
+
+    payload = {
+        "type": PayloadType.MESSAGE_ACTION,
+        "callback_id": "remove_resolution_note",
+        "team": {"id": SLACK_TEAM_ID},
+        "user": {"id": SLACK_USER_ID},
+        "channel": {"id": "C12345"},
+        "message": {"type": "message", "ts": "1710000000.000001", "thread_ts": "1710000000.000000"},
+        "trigger_id": EVENT_TRIGGER_ID,
+    }
+
+    response = _make_request(payload)
+
+    assert response.status_code == status.HTTP_200_OK
+    mock_process_scenario.assert_called_once_with(slack_user_identity, slack_team_identity, payload)
 
 
 @patch("apps.slack.views.SlackEventApiEndpointView.verify_signature", return_value=True)

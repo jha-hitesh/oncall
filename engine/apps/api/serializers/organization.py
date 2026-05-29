@@ -27,6 +27,7 @@ class OrganizationSerializer(EagerLoadingMixin, serializers.ModelSerializer):
     rbac_enabled = serializers.BooleanField(read_only=True, source="is_rbac_permissions_enabled")
     grafana_incident_enabled = serializers.BooleanField(read_only=True, source="is_grafana_incident_enabled")
     grafana_irm_enabled = serializers.BooleanField(read_only=True, source="is_grafana_irm_enabled")
+    schedule_management_require_admin = serializers.SerializerMethodField()
 
     SELECT_RELATED = ["slack_team_identity", "slack_channel"]
 
@@ -41,6 +42,7 @@ class OrganizationSerializer(EagerLoadingMixin, serializers.ModelSerializer):
             "rbac_enabled",
             "grafana_incident_enabled",
             "grafana_irm_enabled",
+            "schedule_management_require_admin",
             "direct_paging_prefer_important_policy",
         ]
         read_only_fields = [
@@ -49,12 +51,20 @@ class OrganizationSerializer(EagerLoadingMixin, serializers.ModelSerializer):
             "rbac_enabled",
             "grafana_incident_enabled",
             "grafana_irm_enabled",
+            "schedule_management_require_admin",
         ]
+
+    def get_schedule_management_require_admin(self, _obj):
+        from django.conf import settings
+
+        return settings.SCHEDULE_MANAGEMENT_REQUIRE_ADMIN
 
 
 class CurrentOrganizationSerializer(OrganizationSerializer):
     env_status = serializers.SerializerMethodField()
     banner = serializers.SerializerMethodField()
+    has_google_oauth2_organization_connected = serializers.BooleanField(read_only=True)
+    google_oauth2_organization_email = serializers.SerializerMethodField()
 
     class Meta(OrganizationSerializer.Meta):
         fields = [
@@ -62,11 +72,20 @@ class CurrentOrganizationSerializer(OrganizationSerializer):
             "is_resolution_note_required",
             "env_status",
             "banner",
+            "has_google_oauth2_organization_connected",
+            "google_oauth2_organization_email",
         ]
         read_only_fields = [
             *OrganizationSerializer.Meta.read_only_fields,
             "banner",
+            "has_google_oauth2_organization_connected",
+            "google_oauth2_organization_email",
         ]
+
+    def get_google_oauth2_organization_email(self, obj):
+        if not obj.has_google_oauth2_organization_connected:
+            return None
+        return obj.google_oauth2_organization.google_user_email
 
     def get_banner(self, obj):
         from apps.base.models import DynamicSetting

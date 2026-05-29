@@ -23,6 +23,7 @@ from apps.api.permissions import LegacyAccessControlRole
 from apps.api.serializers.alert import AlertFieldsCacheSerializerMixin
 from apps.api.serializers.alert_group import AlertGroupFieldsCacheSerializerMixin
 from apps.base.models import UserNotificationPolicyLogRecord
+from apps.labels.models import DEFAULT_LABEL_COLOR_CODE
 from common.api_helpers.filters import DateRangeFilterMixin
 
 alert_raw_request_data = {
@@ -2323,9 +2324,11 @@ def test_alert_group_list_labels(
     make_alert_group_label_association,
     make_alert_receive_channel,
     make_alert_group,
+    make_label_key_and_value,
     make_user_auth_headers,
 ):
     user, token, alert_groups = alert_group_internal_api_setup
+    make_label_key_and_value(user.organization, key_name="a", value_name="b")
     make_alert_group_label_association(user.organization, alert_groups[0], key_name="a", value_name="b")
 
     client = APIClient()
@@ -2334,7 +2337,10 @@ def test_alert_group_list_labels(
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["results"][-1]["labels"] == [
-        {"key": {"id": "a", "name": "a"}, "value": {"id": "b", "name": "b"}}
+        {
+            "key": {"id": "a", "name": "a", "color_code": DEFAULT_LABEL_COLOR_CODE},
+            "value": {"id": "b", "name": "b", "color_code": DEFAULT_LABEL_COLOR_CODE},
+        }
     ]
 
 

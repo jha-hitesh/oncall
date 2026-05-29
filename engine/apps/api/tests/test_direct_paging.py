@@ -11,6 +11,7 @@ from apps.api.permissions import LegacyAccessControlRole
 
 title = "Custom title"
 message = "Testing direct paging with new alert group"
+detailed_description = "Postgres write latency is elevated and checkout creation is timing out for a subset of users."
 source_url = "https://www.example.com"
 grafana_incident_id = "abcd1234"
 
@@ -43,6 +44,7 @@ def test_direct_paging_new_alert_group(
             "users": users_to_page,
             "title": title,
             "message": message,
+            "detailed_description": detailed_description,
         },
         format="json",
         **make_user_auth_headers(user, token),
@@ -59,6 +61,7 @@ def test_direct_paging_new_alert_group(
     assert ag.web_title_cache == title
     assert alert.title == title
     assert alert.message == message
+    assert alert.raw_request_data["oncall"]["detailed_description"] == detailed_description
 
 
 @pytest.mark.parametrize("important_team_escalation", [True, False])
@@ -83,9 +86,11 @@ def test_direct_paging_page_team(
         data={
             "team": team.public_primary_key,
             "message": message,
+            "detailed_description": detailed_description,
             "source_url": source_url,
             "grafana_incident_id": grafana_incident_id,
             "important_team_escalation": important_team_escalation,
+            "dynamic_labels_map": {"service": "checkout", "severity": "critical"},
         },
         format="json",
         **make_user_auth_headers(user, token),
@@ -101,11 +106,13 @@ def test_direct_paging_page_team(
         "oncall": {
             "title": ANY,
             "message": message,
+            "detailed_description": detailed_description,
             "uid": ANY,
             "author_username": ANY,
             "permalink": source_url,
             "important": important_team_escalation,
         },
+        "dynamic_labels_map": {"service": "checkout", "severity": "critical"},
     }
 
 
@@ -278,6 +285,7 @@ def test_direct_paging_both_team_and_users_specified(
     [
         ("title", title),
         ("message", message),
+        ("detailed_description", detailed_description),
         ("source_url", source_url),
         ("grafana_incident_id", grafana_incident_id),
     ],
@@ -292,7 +300,7 @@ def test_direct_paging_alert_group_id_and_other_fields_are_mutually_exclusive(
     field_name,
     field_value,
 ):
-    error_msg = "alert_group_id and (title, message, source_url, grafana_incident_id) are mutually exclusive"
+    error_msg = "alert_group_id and (title, message, detailed_description, source_url, grafana_incident_id) are mutually exclusive"
 
     organization, user, token = make_organization_and_user_with_plugin_token(role=LegacyAccessControlRole.EDITOR)
     team = make_team(organization=organization)
@@ -319,3 +327,31 @@ def test_direct_paging_alert_group_id_and_other_fields_are_mutually_exclusive(
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert response.json()["non_field_errors"] == [error_msg]
+
+
+@pytest.mark.django_db
+def test_direct_paging_message_must_be_50_characters_or_less(
+    make_organization_and_user_with_plugin_token,
+    make_team,
+    make_user_auth_headers,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token(role=LegacyAccessControlRole.EDITOR)
+    team = make_team(organization=organization)
+
+    user.teams.add(team)
+
+    client = APIClient()
+    url = reverse("api-internal:direct_paging")
+
+    response = client.post(
+        url,
+        data={
+            "team": team.public_primary_key,
+            "message": "x" * 51,
+        },
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["message"] == ["Ensure this field has no more than 50 characters."]

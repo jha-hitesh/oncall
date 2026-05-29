@@ -13,9 +13,9 @@ const DEFAULT_VARIABLE_CONFIG: Partial<ConstructorParameters<typeof QueryVariabl
   type: 'query',
 };
 
-const getVariables = ({ isOpenSource, datasource, stack }: InsightsConfig) => ({
+const getVariables = ({ allowDatasourceSelection, datasource, stack }: InsightsConfig) => ({
   // Selectable
-  ...(isOpenSource
+  ...(allowDatasourceSelection
     ? {
         datasource: new DataSourceVariable({
           name: 'datasource',
@@ -77,16 +77,16 @@ const getVariables = ({ isOpenSource, datasource, stack }: InsightsConfig) => ({
   // Non-selectable
   alertGroupsTotal: new QueryVariable({
     ...DEFAULT_VARIABLE_CONFIG,
-    name: 'alert_groups_total',
-    label: 'alert_groups_total',
+    name: 'oncall_alert_groups_total',
+    label: 'oncall_alert_groups_total',
     datasource,
     query: {
-      query: 'metrics(alert_groups_total)',
+      query: 'metrics(oncall_alert_groups_total)',
       refId: 'PrometheusVariableQueryEditor-VariableQuery',
     },
-    text: ['oncall_alert_groups_total', 'grafanacloud_oncall_instance_alert_groups_total'],
-    value: ['oncall_alert_groups_total', 'grafanacloud_oncall_instance_alert_groups_total'],
-    definition: 'metrics(alert_groups_total)',
+    text: ['oncall_alert_groups_total'],
+    value: ['oncall_alert_groups_total'],
+    definition: 'metrics(oncall_alert_groups_total)',
     hide: 2,
   }),
   userNotified: new QueryVariable({

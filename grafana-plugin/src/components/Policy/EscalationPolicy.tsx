@@ -30,6 +30,7 @@ import { Schedule } from 'models/schedule/schedule.types';
 import { UserHelper } from 'models/user/user.helpers';
 import { UserGroup } from 'models/user_group/user_group.types';
 import { ApiSchemas } from 'network/oncall-api/api.types';
+import { AppFeature } from 'state/features';
 import { WithStoreProps } from 'state/types';
 import { withMobXProviderContext } from 'state/withStore';
 
@@ -60,6 +61,12 @@ interface EscalationPolicyBaseProps {
 export interface EscalationPolicyProps extends EscalationPolicyBaseProps, ElementSortableProps {
   theme: GrafanaTheme2;
 }
+
+const CALENDAR_INVITE_INVITEE_OPTIONS = [
+  { value: 'current_oncall_members', label: 'Current on-call members' },
+  { value: 'current_escalation_chain_members', label: 'Current escalation chain members' },
+  { value: 'current_team_members', label: 'Current team members' },
+];
 
 @observer
 class _EscalationPolicy extends React.Component<EscalationPolicyProps, any> {
@@ -133,6 +140,8 @@ class _EscalationPolicy extends React.Component<EscalationPolicyProps, any> {
         return this.renderNumMinutesInWindowOptions();
       case 'severity':
         return this.renderSeverities();
+      case 'invitees':
+        return this.renderInvitees();
       default:
         console.warn('Unknown escalation step placeholder');
         return '';
@@ -161,6 +170,14 @@ class _EscalationPolicy extends React.Component<EscalationPolicyProps, any> {
     switch (step) {
       case 13:
         return <PolicyNote>{`Your timezone is ${moment.tz.guess()}`}</PolicyNote>;
+      case 21:
+        if (!this.props.store.hasFeature(AppFeature.GoogleOauth2)) {
+          return <PolicyNote type="danger">Google OAuth feature is required</PolicyNote>;
+        }
+        if (!this.props.store.organizationStore.currentOrganization?.has_google_oauth2_organization_connected) {
+          return <PolicyNote type="danger">Google Calendar organization connection is required</PolicyNote>;
+        }
+        return null;
 
       default:
         return null;
@@ -273,6 +290,27 @@ class _EscalationPolicy extends React.Component<EscalationPolicyProps, any> {
             value: severity_choice.value,
             label: severity_choice.display_name,
           }))}
+        />
+      </WithPermissionControlTooltip>
+    );
+  }
+
+  renderInvitees() {
+    const { data, isDisabled, theme } = this.props;
+    const { invitees } = data;
+    const styles = getEscalationPolicyStyles(theme);
+
+    return (
+      <WithPermissionControlTooltip key="invitees" userAction={UserActions.EscalationChainsWrite}>
+        <Select
+          menuShouldPortal
+          disabled={isDisabled}
+          placeholder="Select invitees"
+          className={cx(styles.select, styles.control)}
+          value={invitees}
+          onChange={this.getOnSelectChangeHandler('invitees')}
+          options={CALENDAR_INVITE_INVITEE_OPTIONS}
+          width={'auto'}
         />
       </WithPermissionControlTooltip>
     );

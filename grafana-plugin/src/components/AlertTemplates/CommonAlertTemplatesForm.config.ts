@@ -122,6 +122,47 @@ export const commonTemplateForEdit: { [id: string]: TemplateForEdit } = {
     },
     type: 'plain',
   },
+  slack_create_custom_channel_template: {
+    name: IntegrationTemplateOptions.SlackCreateCustomChannel.key,
+    displayName: 'Create Custom Channel',
+    description: 'should return true/false',
+    additionalData: {
+      chatOpsName: 'slack',
+      chatOpsDisplayName: 'Slack',
+    },
+    type: 'boolean',
+  },
+  slack_channel_payload_template: {
+    name: IntegrationTemplateOptions.SlackChannelPayload.key,
+    displayName: 'Channel Payload',
+    description: 'Render a JSON object with at least `name` and optionally `is_private`.',
+    additionalData: {
+      chatOpsName: 'slack',
+      chatOpsDisplayName: 'Slack',
+      data: 'Render a JSON object with at least `name` and optionally `is_private`.',
+    },
+    type: 'plain',
+  },
+  google_calendar_title_template: {
+    name: IntegrationTemplateOptions.GoogleCalendarTitle.key,
+    displayName: 'Google Calendar title',
+    description: '',
+    additionalData: {
+      chatOpsName: 'google_calendar',
+      chatOpsDisplayName: 'Google Calendar',
+    },
+    type: 'plain',
+  },
+  google_calendar_description_template: {
+    name: IntegrationTemplateOptions.GoogleCalendarDescription.key,
+    displayName: 'Google Calendar description',
+    description: '',
+    additionalData: {
+      chatOpsName: 'google_calendar',
+      chatOpsDisplayName: 'Google Calendar',
+    },
+    type: 'plain',
+  },
   web_image_url_template: {
     name: IntegrationTemplateOptions.WebImage.key,
     displayName: 'Web image url',

@@ -59,6 +59,8 @@ The above command returns JSON structured in the following way:
       "headers": null,
       "url": "https://example.com",
       "forward_all": false,
+      "add_response_to_timeline": false,
+      "response_template": null,
       "http_method": "POST",
       "trigger_type": "acknowledge",
       "integration_filter": [
@@ -102,6 +104,8 @@ The above command returns JSON structured in the following way:
   "headers": null,
   "url": "https://example.com",
   "forward_all": false,
+  "add_response_to_timeline": false,
+  "response_template": null,
   "http_method": "POST",
   "trigger_type": "acknowledge",
   "integration_filter": [
@@ -123,7 +127,9 @@ curl "{{API_URL}}/api/v1/webhooks/" \
     "name": "New Webhook",
     "url": "https://example.com",
     "http_method": "POST",
-    "trigger_type" : "resolve"
+    "trigger_type" : "resolve",
+    "add_response_to_timeline": true,
+    "response_template": "Ticket status: {{ webhook_response.status }}"
   }'
 ```
 
@@ -166,6 +172,8 @@ The above command returns JSON structured in the following way:
   "headers": null,
   "url": "https://example.com",
   "forward_all": true,
+  "add_response_to_timeline": true,
+  "response_template": "Ticket status: {{ webhook_response.status }}",
   "http_method": "POST",
   "trigger_type": "resolve",
   "integration_filter": null
@@ -202,11 +210,18 @@ The above command returns JSON structured in the following way:
   "headers": null,
   "url": "https://example.com",
   "forward_all": true,
+  "add_response_to_timeline": true,
+  "response_template": "Ticket status: {{ webhook_response.status }}",
   "http_method": "POST",
   "trigger_type": "resolve",
   "integration_filter": null
 }
 ```
+
+### Additional fields
+
+- `add_response_to_timeline`: When `true`, Grafana OnCall creates an alert group timeline entry after the webhook completes.
+- `response_template`: Optional Jinja template used to render the response in that timeline entry. The template can use `webhook_response`.
 
 ## Delete webhook
 

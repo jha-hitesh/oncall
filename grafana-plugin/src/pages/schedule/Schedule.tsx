@@ -17,7 +17,11 @@ import {
 } from '@grafana/ui';
 import dayjs from 'dayjs';
 import { HTML_ID, scrollToElement } from 'helpers/DOM';
-import { isUserActionAllowed, UserActions } from 'helpers/authorization/authorization';
+import {
+  getScheduleManagementWriteUserAction,
+  isUserActionAllowed,
+  UserActions,
+} from 'helpers/authorization/authorization';
 import { PLUGIN_ROOT, StackSize } from 'helpers/consts';
 import { PropsWithRouter, withRouter } from 'helpers/hoc';
 import { observer } from 'mobx-react';
@@ -150,6 +154,9 @@ class _SchedulePage extends React.Component<SchedulePageProps, SchedulePageState
     const { isNotFoundError } = store.scheduleStore.refreshEventsError;
 
     const { scheduleStore, timezoneStore } = store;
+    const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+      store.organizationStore.currentOrganization?.schedule_management_require_admin
+    );
 
     const users = UserHelper.getSearchResult(store.userStore).results;
     const schedule = scheduleStore.items[scheduleId];
@@ -157,14 +164,14 @@ class _SchedulePage extends React.Component<SchedulePageProps, SchedulePageState
     const styles = getScheduleStyles(theme);
 
     const disabledRotationForm =
-      !isUserActionAllowed(UserActions.SchedulesWrite) ||
+      !isUserActionAllowed(scheduleManagementWriteAction) ||
       schedule?.type !== ScheduleType.API ||
       !!shiftIdToShowRotationForm ||
       shiftIdToShowOverridesForm ||
       shiftSwapIdToShowForm;
 
     const disabledOverrideForm =
-      !isUserActionAllowed(UserActions.SchedulesWrite) ||
+      !isUserActionAllowed(scheduleManagementWriteAction) ||
       !schedule?.enable_web_overrides ||
       !!shiftIdToShowOverridesForm ||
       shiftIdToShowRotationForm ||
@@ -232,7 +239,7 @@ class _SchedulePage extends React.Component<SchedulePageProps, SchedulePageState
                             </Stack>
 
                             {(schedule?.type === ScheduleType.Ical || schedule?.type === ScheduleType.Calendar) && (
-                              <WithPermissionControlTooltip userAction={UserActions.SchedulesWrite}>
+                              <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
                                 <Button variant="secondary" onClick={this.handleReloadClick(scheduleId)}>
                                   Reload
                                 </Button>
@@ -309,16 +316,20 @@ class _SchedulePage extends React.Component<SchedulePageProps, SchedulePageState
                               </ButtonGroup>
                             </Dropdown>
                           </Stack>
-                          <ToolbarButton
-                            icon="cog"
-                            tooltip="Settings"
-                            onClick={() => {
-                              this.setState({ showEditForm: true });
-                            }}
-                          />
-                          <WithConfirm>
-                            <ToolbarButton icon="trash-alt" tooltip="Delete" onClick={this.handleDelete} />
-                          </WithConfirm>
+                          <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
+                            <ToolbarButton
+                              icon="cog"
+                              tooltip="Settings"
+                              onClick={() => {
+                                this.setState({ showEditForm: true });
+                              }}
+                            />
+                          </WithPermissionControlTooltip>
+                          <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
+                            <WithConfirm>
+                              <ToolbarButton icon="trash-alt" tooltip="Delete" onClick={this.handleDelete} />
+                            </WithConfirm>
+                          </WithPermissionControlTooltip>
                         </Stack>
                       </Stack>
                     </Stack>

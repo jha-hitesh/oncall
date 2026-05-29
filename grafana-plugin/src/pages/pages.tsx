@@ -95,6 +95,15 @@ export const pages: { [id: string]: PageDefinition } = [
     action: UserActions.SchedulesRead,
   },
   {
+    icon: 'tag-alt',
+    id: 'labels',
+    text: 'Labels',
+    hideFromBreadcrumbs: true,
+    path: getPath('labels'),
+    action: UserActions.LabelsRead,
+    hideFromTabsFn: (store: RootBaseStore) => !store.hasFeature(AppFeature.Labels),
+  },
+  {
     icon: 'link',
     id: 'outgoing_webhooks',
     text: 'Outgoing webhooks',
@@ -177,6 +186,7 @@ export const ROUTES = {
   integrations: ['integrations', 'integrations/:id'],
   escalations: ['escalations', 'escalations/:id'],
   schedules: ['schedules', 'schedules/:id'],
+  labels: ['labels'],
   outgoing_webhooks: ['outgoing_webhooks', 'outgoing_webhooks/:id', 'outgoing_webhooks/:action/:id'],
   settings: ['settings'],
   'chat-ops': ['chat-ops'],

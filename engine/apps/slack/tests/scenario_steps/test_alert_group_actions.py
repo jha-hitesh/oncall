@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
+from apps.alerts.models import AlertGroupLogRecord, EscalationPolicy
 from apps.api.permissions import LegacyAccessControlRole
 from apps.slack.scenarios.scenario_step import ScenarioStep
 from apps.slack.scenarios.step_mixins import AlertGroupActionsMixin
@@ -880,3 +881,77 @@ def test_step_resolution_note(
 
     mock_slack_api_call.assert_called_once()
     mock_get_conversation_members.assert_called_once_with(step._slack_client, channel_id)
+
+
+@pytest.mark.django_db
+def test_step_custom_webhook_triggered_posts_message_to_thread(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_slack_channel,
+    make_slack_message,
+    make_alert_group_log_record,
+):
+    organization, slack_team_identity = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    slack_channel = make_slack_channel(slack_team_identity)
+    make_slack_message(slack_channel, alert_group=alert_group)
+
+    log_record = make_alert_group_log_record(
+        alert_group,
+        AlertGroupLogRecord.TYPE_CUSTOM_WEBHOOK_TRIGGERED,
+        None,
+        reason="200",
+        step_specific_info={"webhook_name": "notify-api", "trigger": "resolve"},
+    )
+
+    step_class = ScenarioStep.get_step("distribute_alerts", "CustomWebhookTriggeredStep")
+    step = step_class(slack_team_identity)
+
+    with patch.object(step.alert_group_slack_service, "publish_message_to_alert_group_thread") as mock_publish:
+        with patch("apps.slack.models.slack_message.SlackMessage.update_alert_groups_message") as mock_update:
+            step.process_signal(log_record)
+
+    mock_publish.assert_called_once_with(
+        alert_group,
+        text="outgoing webhook `notify-api` triggered by resolve",
+    )
+    mock_update.assert_called_once_with(debounce=False)
+
+
+@pytest.mark.django_db
+def test_step_calendar_invite_finished_posts_message_to_thread(
+    make_organization_with_slack_team_identity,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_slack_channel,
+    make_slack_message,
+    make_alert_group_log_record,
+):
+    organization, slack_team_identity = make_organization_with_slack_team_identity()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    slack_channel = make_slack_channel(slack_team_identity)
+    make_slack_message(slack_channel, alert_group=alert_group)
+
+    log_record = make_alert_group_log_record(
+        alert_group,
+        AlertGroupLogRecord.TYPE_ESCALATION_FINISHED,
+        None,
+        escalation_policy_step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+        step_specific_info={"google_calendar_meet_link": "https://meet.google.com/abc-defg-hij"},
+    )
+
+    step_class = ScenarioStep.get_step("distribute_alerts", "CalendarInviteFinishedStep")
+    step = step_class(slack_team_identity)
+
+    with patch.object(step.alert_group_slack_service, "publish_message_to_alert_group_thread") as mock_publish:
+        with patch("apps.slack.models.slack_message.SlackMessage.update_alert_groups_message") as mock_update:
+            step.process_signal(log_record)
+
+    mock_publish.assert_called_once_with(
+        alert_group,
+        text="Google Calender Invite Sent, Join Link: <https://meet.google.com/abc-defg-hij>",
+    )
+    mock_update.assert_called_once_with(debounce=False)

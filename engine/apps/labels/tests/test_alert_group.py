@@ -135,6 +135,36 @@ def test_assign_dynamic_labels(
 
 
 @pytest.mark.django_db
+def test_assign_dynamic_labels_skips_missing_value_for_managed_key(
+    make_organization,
+    make_alert_receive_channel,
+    make_label_key,
+    make_label_value,
+):
+    organization = make_organization()
+
+    managed_key = make_label_key(organization=organization, key_name="severity", is_managed_label=True)
+    _ = make_label_value(managed_key, value_name="critical")
+
+    alert_receive_channel = make_alert_receive_channel(
+        organization,
+        alert_group_labels_custom=[[managed_key.id, None, "{{ payload.severity }}"]],
+    )
+
+    alert = Alert.create(
+        title="the title",
+        message="the message",
+        alert_receive_channel=alert_receive_channel,
+        raw_request_data={"severity": "warning"},
+        integration_unique_data={},
+        image_url=None,
+        link_to_upstream_details=None,
+    )
+
+    assert list(alert.group.labels.values_list("key_name", "value_name")) == []
+
+
+@pytest.mark.django_db
 def test_assign_static_labels(
     make_organization,
     make_alert_receive_channel,
@@ -162,6 +192,109 @@ def test_assign_static_labels(
     )
 
     assert [(label.key_name, label.value_name) for label in alert.group.labels.all()] == [("severity", "critical")]
+
+
+@pytest.mark.django_db
+def test_direct_paging_dynamic_labels_map_overrides_integration_and_static_labels(
+    make_organization,
+    make_alert_receive_channel,
+    make_static_label_config,
+    make_label_key,
+    make_label_value,
+):
+    organization = make_organization()
+
+    severity_key = make_label_key(organization=organization, key_name="severity")
+    severity_warning = make_label_value(severity_key, value_name="warning")
+    _ = make_label_value(severity_key, value_name="critical")
+
+    service_key = make_label_key(organization=organization, key_name="service")
+    _ = make_label_value(service_key, value_name="checkout")
+
+    alert_receive_channel = make_alert_receive_channel(
+        organization,
+        alert_group_labels_custom=[
+            [severity_key.id, None, "{{ payload.dynamic_labels_map.severity }}"],
+            [severity_key.id, severity_warning.id, None],
+            [service_key.id, None, "{{ payload.dynamic_labels_map.service }}"],
+        ],
+    )
+    make_static_label_config(organization, alert_receive_channel, key_name="severity", value_name="minor")
+
+    alert = Alert.create(
+        title="the title",
+        message="the message",
+        alert_receive_channel=alert_receive_channel,
+        raw_request_data={"dynamic_labels_map": {"severity": "critical", "service": "checkout"}},
+        integration_unique_data={},
+        image_url=None,
+        link_to_upstream_details=None,
+    )
+
+    assert [(label.key_name, label.value_name) for label in alert.group.labels.all()] == [
+        ("service", "checkout"),
+        ("severity", "critical"),
+    ]
+
+
+@pytest.mark.django_db
+def test_direct_paging_dynamic_labels_map_skips_missing_value_for_managed_key(
+    make_organization,
+    make_alert_receive_channel,
+    make_label_key,
+    make_label_value,
+):
+    organization = make_organization()
+
+    severity_key = make_label_key(organization=organization, key_name="severity", is_managed_label=True)
+    _ = make_label_value(severity_key, value_name="critical")
+
+    alert_receive_channel = make_alert_receive_channel(
+        organization,
+        alert_group_labels_custom=[[severity_key.id, None, "{{ payload.dynamic_labels_map.severity }}"]],
+    )
+
+    alert = Alert.create(
+        title="the title",
+        message="the message",
+        alert_receive_channel=alert_receive_channel,
+        raw_request_data={"dynamic_labels_map": {"severity": "warning"}},
+        integration_unique_data={},
+        image_url=None,
+        link_to_upstream_details=None,
+    )
+
+    assert list(alert.group.labels.values_list("key_name", "value_name")) == []
+
+
+@pytest.mark.django_db
+def test_multi_label_extraction_template_skips_missing_value_for_managed_key(
+    make_organization,
+    make_alert_receive_channel,
+    make_label_key,
+    make_label_value,
+):
+    organization = make_organization()
+
+    severity_key = make_label_key(organization=organization, key_name="severity", is_managed_label=True)
+    _ = make_label_value(severity_key, value_name="critical")
+
+    alert_receive_channel = make_alert_receive_channel(
+        organization,
+        alert_group_labels_template='{{ {"severity": payload.severity} | tojson }}',
+    )
+
+    alert = Alert.create(
+        title="the title",
+        message="the message",
+        alert_receive_channel=alert_receive_channel,
+        raw_request_data={"severity": "warning"},
+        integration_unique_data={},
+        image_url=None,
+        link_to_upstream_details=None,
+    )
+
+    assert list(alert.group.labels.values_list("key_name", "value_name")) == []
 
 
 @pytest.mark.django_db

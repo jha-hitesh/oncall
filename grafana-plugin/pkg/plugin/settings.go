@@ -110,7 +110,6 @@ const OSS_VERSION_PATTERN = `^(\d+\.\d+\.\d+)$`
 const CLOUD_LICENSE_NAME = "Cloud"
 const OPEN_SOURCE_LICENSE_NAME = "OpenSource"
 const INCIDENT_PLUGIN_ID = "grafana-incident-app"
-const LABELS_PLUGIN_ID = "grafana-labels-app"
 const OTHER_PLUGIN_EXPIRY_SECONDS = 60
 
 func (a *App) OnCallSettingsFromContext(ctx context.Context) (*OnCallPluginSettings, error) {
@@ -197,12 +196,7 @@ func (a *App) OnCallSettingsFromContext(ctx context.Context) (*OnCallPluginSetti
 			}
 		}
 	}
-	pluginSettings, exists = otherPluginSettings[LABELS_PLUGIN_ID]
-	if exists {
-		if value, ok := pluginSettings["enabled"].(bool); ok {
-			settings.LabelsEnabled = value
-		}
-	}
+	settings.LabelsEnabled = true
 	return &settings, nil
 }
 
@@ -218,17 +212,9 @@ func (a *App) GetAllOtherPluginSettings(settings *OnCallPluginSettings) map[stri
 	if err != nil {
 		log.DefaultLogger.Error("getting incident plugin settings", "error", err)
 	}
-	labelsPluginSettings, err := a.GetOtherPluginSettings(settings, LABELS_PLUGIN_ID)
-	if err != nil {
-		log.DefaultLogger.Error("getting labels plugin settings", "error", err)
-	}
-
 	otherPluginSettings := make(map[string]map[string]interface{})
 	if incidentPluginSettings != nil {
 		otherPluginSettings[INCIDENT_PLUGIN_ID] = incidentPluginSettings
-	}
-	if labelsPluginSettings != nil {
-		otherPluginSettings[LABELS_PLUGIN_ID] = labelsPluginSettings
 	}
 
 	a.otherPluginSettingsCache = otherPluginSettings

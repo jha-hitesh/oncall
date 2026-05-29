@@ -118,6 +118,7 @@ export const WebhooksTemplateEditor: React.FC<WebhooksTemplateEditorProps> = ({
             heading="Last events"
             templatePage={TemplatePage.Webhooks}
             outgoingwebhookId={id}
+            includeWebhookResponse={template.name === 'response_template'}
             onEditPayload={onEditPayload}
             templates={
               {

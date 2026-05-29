@@ -30,6 +30,7 @@ export const OutgoingWebhookFormFields: FC<OutgoingWebhookFormFieldsProps> = ({ 
   const [templateToEdit, setTemplateToEdit] = useState<TemplateToEdit>();
 
   const [showTriggerTemplate] = watch(['triggerTemplateToogle']);
+  const [addResponseToTimeline] = watch(['add_response_to_timeline']);
 
   return (
     <Stack direction="column" gap={StackSize.lg}>
@@ -180,6 +181,58 @@ export const OutgoingWebhookFormFields: FC<OutgoingWebhookFormFieldsProps> = ({ 
           </Stack>
         )}
       />
+      <div className={styles.triggerTemplateWrapper}>
+        <div className={cn(styles.switcherFieldWrapper, styles.addTriggerTemplate)}>
+          <Controller
+            control={control}
+            name="add_response_to_timeline"
+            render={({ field: { value, onChange } }) => <Switch value={value} onChange={() => onChange(!value)} />}
+          />
+          <Label className={styles.switcherLabel}>
+            <span>Add response to timeline</span>
+          </Label>
+        </div>
+        {addResponseToTimeline && (
+          <Controller
+            control={control}
+            name="response_template"
+            render={({ field }) => (
+              <>
+                <MonacoEditor
+                  {...field}
+                  data={{}}
+                  showLineNumbers={false}
+                  monacoOptions={MONACO_READONLY_CONFIG}
+                  onChange={field.onChange}
+                />
+                <Button
+                  icon="edit"
+                  variant="secondary"
+                  className={styles.editTriggerTemplateBtn}
+                  onClick={() => {
+                    setTemplateToEdit({
+                      value: field.value,
+                      displayName: 'response template',
+                      name: field.name,
+                    });
+                  }}
+                />
+                {templateToEdit?.['name'] === field.name && (
+                  <WebhooksTemplateEditor
+                    id={webhookId}
+                    handleSubmit={(value) => {
+                      field.onChange(value);
+                      setTemplateToEdit(undefined);
+                    }}
+                    onHide={() => setTemplateToEdit(undefined)}
+                    template={templateToEdit}
+                  />
+                )}
+              </>
+            )}
+          />
+        )}
+      </div>
       <div className={styles.triggerTemplateWrapper}>
         <div className={cn(styles.switcherFieldWrapper, styles.addTriggerTemplate)}>
           <Controller

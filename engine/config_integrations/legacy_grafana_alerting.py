@@ -1,6 +1,12 @@
 # Main
 # It's a Deprecated Grafana Alerting integration which was processing one alert at once instead of processing a group.
 # All such integrations are migrated.
+from .common import (
+    DEFAULT_GOOGLE_CALENDAR_DESCRIPTION_TEMPLATE,
+    DEFAULT_GOOGLE_CALENDAR_TITLE_TEMPLATE,
+    DEFAULT_SLACK_CHANNEL_PAYLOAD_TEMPLATE,
+    DEFAULT_SLACK_CREATE_CUSTOM_CHANNEL_TEMPLATE,
+)
 from settings.base import IS_OPEN_SOURCE
 
 enabled = True
@@ -54,6 +60,10 @@ slack_message = """\
 
 
 slack_image_url = None
+slack_create_custom_channel = DEFAULT_SLACK_CREATE_CUSTOM_CHANNEL_TEMPLATE
+slack_channel_payload = DEFAULT_SLACK_CHANNEL_PAYLOAD_TEMPLATE
+google_calendar_title = DEFAULT_GOOGLE_CALENDAR_TITLE_TEMPLATE
+google_calendar_description = DEFAULT_GOOGLE_CALENDAR_DESCRIPTION_TEMPLATE
 
 web_title = """\
 {# Usually title is located in payload.labels.alertname #}

@@ -8,6 +8,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.0.0 (2026-03-15)
+
+### Added
+
+- Organization-level Google Calendar support. Admins can now connect a shared Google account from **Settings > Google Calendar**, separate from per-user Google Calendar profile connections. The current organization payload now exposes connection state and connected account email, and OnCall can disconnect and fully reset expired organization tokens.
+- A new **Create calendar invite** escalation step. Escalation chains can now create Google Calendar events for one of three invitee groups: **Current on-call members**, **Current escalation chain members**, or **Current team members**.
+- Automatic Google Meet creation for organization-managed calendar events. When the calendar invite step succeeds, OnCall stores the event link and Meet link, publishes the outcome to the alert group timeline, and posts the join link into the Slack incident thread when available.
+- New Google Calendar integration templates on integration settings pages: **Google Calendar title** and **Google Calendar description**. These templates let each integration control the event summary and event body created by the calendar invite escalation step.
+- A new **Google Calendar** settings tab in the Grafana OnCall settings page, including connect, disconnect, and OAuth error handling for missing scopes and missing refresh tokens.
+- A dedicated **Labels** page in the Grafana OnCall navigation. The new page provides separate **Keys** and **Values** tabs so teams can manage reusable labels centrally instead of only creating them inline during integration editing.
+- Full label key lifecycle management. Admins can now create, search, rename, recolor, mark as managed, and delete label keys.
+- Full label value lifecycle management. Admins can now create, search, rename, recolor, filter by key, and delete label values.
+- Colored label rendering throughout the product. Label keys and values now store `color_code`, the API returns those colors, and the UI renders colorized tags for integration labels, alert group labels, direct paging labels, severity options, and label management views.
+- Managed label support for label keys via `is_managed_label`. This makes it possible to distinguish centrally managed keys from ordinary reusable keys.
+- New label defaults returned by the features API: `label_key_default_color` and `label_value_default_color`. These defaults drive the initial color shown in the label management UI and label editors.
+- New label RBAC actions inside the OnCall plugin: `label:read`, `label:write`, and `label:create`. The new Labels page is protected by these actions, and label mutation now requires admin-level label permissions.
+- Direct paging form enhancements across the web UI and Slack `/escalate` flow:
+  - **What is going on?** is now a short message capped at 50 characters.
+  - **Detailed description** is now a separate long-form field for richer context.
+  - Team-specific dynamic label selection is now supported before submission.
+  - Static labels configured on the selected team’s direct paging integration are now shown before submit.
+- Dynamic direct paging label submission. Manual paging can now pass `dynamic_labels_map`, allowing responders to choose required values for dynamic alert-group labels at creation time.
+- New integration-level templates for Slack custom channel creation:
+  - **Create Custom Channel**: a boolean Jinja template that decides whether a dedicated Slack channel should be created for an alert group.
+  - **Channel Payload**: a JSON Jinja template that defines the Slack channel name and optional privacy settings.
+- Automatic custom Slack channel creation for alert groups when enabled per integration and allowed by feature flag. OnCall now creates or reuses the target Slack channel, attaches it to the alert group, logs the outcome, and routes follow-up thread activity against the alert group’s effective Slack location.
+- Outgoing webhooks can now record the webhook response in the alert group timeline via a new **Add response to timeline** option.
+- Outgoing webhooks also support a new **Response template** field. This Jinja template renders a compact timeline message from `webhook_response`, using parsed JSON when possible and falling back to raw response text otherwise.
+- New runtime settings for phone calls:
+  - `ALERT_GROUP_PHONE_CALL_TEMPLATE` to customize the spoken alert body.
+  - `PHONE_CALL_INSTRUCTIONS_CONFIG` to configure keypad digits, silence duration, enabled actions, and wait timeout.
+  - `PHONE_CALL_INSTRUCTIONS_TEMPLATE` to customize the spoken instructions after the alert body.
+- New phone-call actions. Phone notifications can now optionally support **resolve**, **silence**, and **repeat message** as configurable keypad actions, instead of relying on a fixed hard-coded instruction set.
+- Helm support for deploying **Celery Flower** as an optional chart dependency, including deployment, service, ingress, secrets/config, and ServiceMonitor templates.
+- New feature flags and environment settings:
+  - `FEATURE_SLACK_CHANNEL_CREATION_ENABLED`: exposes integration-level Slack channel creation templates and enables dedicated channel creation for alert groups.
+  - `FEATURE_SLACK_ADD_USER_BEFORE_TAGGING`: allows OnCall to invite a Slack user into the incident channel before tagging them if they are not already present.
+  - `FEATURE_SLACK_USE_ORIGINAL_TS_IN_RESOLUTION_NOTE`: uses the original Slack message timestamp as the created-at timestamp for resolution notes built from Slack messages.
+  - `FEATURE_GRAFANA_CLOUD_CONNECTION_ENABLED`: allows Grafana Cloud connection controls to be disabled independently in OSS.
+  - `FEATURE_LABELS_KEY_DEFAULT_COLOR`: default color for newly created label keys.
+  - `FEATURE_LABELS_VALUE_DEFAULT_COLOR`: default color for newly created label values.
+  - `SCHEDULE_MANAGEMENT_REQUIRE_ADMIN`: requires admin-level schedule write permissions for schedule and override management.
+  - `FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS`: controls whether direct paging integrations are automatically created for teams.
+  - `FEATURE_ALLOW_DIRECT_PAGING_CREATION`: allows direct paging integrations to appear in the **+ New integration** flow.
+  - `FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION`: allows direct paging integrations to be deleted.
+
+### Changed
+
+- Integration templates are now feature-aware in the UI. Telegram, mobile push, Slack custom channel, Google Calendar, Mattermost, and MS Teams template editors are shown only when the corresponding feature is enabled.
+- All major web integration types now ship with default Slack custom channel templates and default Google Calendar templates. This means Alertmanager, Grafana Alerting, Manual, Webhook, Direct paging, Inbound Email, Maintenance, Kapacitor, Zabbix, Formatted Webhook, and legacy alerting integrations can all participate in calendar invite rendering and optional custom Slack channel creation.
+- Direct paging integrations are no longer always hidden from integration creation. When `FEATURE_ALLOW_DIRECT_PAGING_CREATION` is enabled, **Direct paging** appears in the create-integration selector and can be created from the standard UI flow.
+- Direct paging integrations are no longer always undeletable. When `FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION` is enabled, the API exposes `allow_delete: true` and the delete path is allowed.
+- Direct paging auto-provisioning is now conditional. Team creation and sync logic will skip automatic direct paging integration creation when `FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS` is disabled.
+- Alert group label mapping now supports both static key/value selections and dynamic Jinja-derived values in the same mapping model. Static custom alert-group labels are preserved instead of being discarded as deprecated input.
+- Label storage has moved fully into the local OnCall label cache model for key and value creation workflows. OnCall can now create missing keys and values locally, annotate keys with value counts, and return richer label representations without depending on external label-repo lookups during management operations.
+- Schedule management permissions are now configurable. Schedule create, update, delete, reload, override, and rotation controls use either editor-level or admin-level RBAC depending on `SCHEDULE_MANAGEMENT_REQUIRE_ADMIN`, and the UI changes its permission checks accordingly.
+- The settings and features APIs now return more installation-level behavior data to the frontend, including direct-paging creation availability, default label colors, schedule-management policy, email availability, Slack channel creation availability, and cloud connection availability.
+- Resolution note workflows in Slack are more complete. Slack now supports both **Add as resolution note** and **Remove from resolution note**, and can also process compatible Slack event callbacks in addition to the message action path.
+- Resolution note creation logic has been centralized so Slack-created notes can optionally preserve the original Slack message timestamp.
+- Slack follow-up posting logic now respects alert-group-specific follow-up placement instead of always hard-coding the original thread timestamp. This is important for alert groups that move into dedicated Slack channels.
+- The incident timeline now retains escalation-finished entries for Google Calendar invite steps so calendar outcomes remain visible in the incident log.
+- Outgoing webhook timeline behavior is richer. On success, OnCall now emits the main webhook trigger log record immediately and optionally emits a second response log record containing the rendered or raw response body.
+- The Labels feature is now fully owned by the OnCall plugin permissions and navigation, rather than relying on the external Grafana Labels plugin permission namespace.
+
+### Fixed
+
+- Slack user tagging can now succeed in channels where the target responder is not yet a member, when `FEATURE_SLACK_ADD_USER_BEFORE_TAGGING` is enabled. OnCall invites the user first, handles the already-in-channel case, and records clearer Slack failure reasons for rate limits, archived channels, token problems, and invite failures.
+- Slack resolution note shortcuts now behave correctly in more contexts, including dedicated incident channels and unified Slack deployments, and provide clearer warnings when the selected message cannot be attached or removed.
+- The product now prevents users from removing the final resolution note from a resolved incident when resolution notes are required.
+- Google OAuth handling is more reliable. Both user-level and organization-level Google connections now explicitly handle the case where Google does not return a refresh token and redirect back with a concrete error state.
+- Google Calendar event creation failures now produce clearer outcomes:
+  - missing organization connection returns a client error
+  - missing permissions returns a forbidden response
+  - expired refresh tokens reset the stored organization connection and request reconnection
+  - generic upstream Google failures return a gateway error
+- Phone-call interactions are no longer locked to fixed digits and a fixed 30-minute silence action. Wait time, enabled actions, silence duration, and repeated playback now follow installation settings.
+- The spoken phone-call instructions now omit disabled actions instead of reading invalid or unusable options.
+- Direct paging message validation now enforces the new short-message contract and prevents `alert_group_id` from being mixed with title, short message, detailed description, source URL, or incident metadata payloads.
+- Integration template preview support now covers Google Calendar templates and Slack custom channel payload templates, including JSON object validation for rendered channel payloads.
+- Alert group timeline rendering now includes richer links and display text for Google Calendar events, Slack channels, and outgoing webhook response entries.
+
 ## v1.3.109 (2024-03-04)
 
 ### Fixed

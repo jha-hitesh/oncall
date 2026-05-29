@@ -56,6 +56,9 @@ const Settings: FC<SettingsProps> = observer(({ closeDrawer }) => {
     if (!values.triggerTemplateToogle) {
       values.trigger_template = null;
     }
+    if (!values.add_response_to_timeline) {
+      values.response_template = null;
+    }
     await alertReceiveChannelWebhooksStore.update(integrationId, { id: webhook.id, ...values });
     closeDrawer();
   };

@@ -40,12 +40,14 @@ class BasePagingSerializer(serializers.Serializer):
     users = UserReferenceSerializer(many=True, required=False, default=list)
     team = TeamPrimaryKeyRelatedField(allow_null=True, default=CurrentTeamDefault())
     important_team_escalation = serializers.BooleanField(required=False, default=False)
+    dynamic_labels_map = serializers.DictField(child=serializers.CharField(), required=False, default=dict)
 
     alert_group_id = serializers.CharField(required=False, default=None)
     alert_group = serializers.HiddenField(default=None)  # set in DirectPagingSerializer.validate
 
     title = serializers.CharField(required=False, default=None)
-    message = serializers.CharField(required=False, default=None, allow_null=True)
+    message = serializers.CharField(required=False, default=None, allow_null=True, max_length=50)
+    detailed_description = serializers.CharField(required=False, default=None, allow_null=True, allow_blank=True)
     source_url = serializers.URLField(required=False, default=None, allow_null=True)
 
     def validate(self, attrs):
@@ -53,12 +55,13 @@ class BasePagingSerializer(serializers.Serializer):
         alert_group_id = attrs["alert_group_id"]
         title = attrs["title"]
         message = attrs["message"]
+        detailed_description = attrs["detailed_description"]
         source_url = attrs["source_url"]
         grafana_incident_id = self.ALLOWS_GRAFANA_INCIDENT_ID and attrs.get("grafana_incident_id")
 
-        if alert_group_id and (title or message or source_url or grafana_incident_id):
+        if alert_group_id and (title or message or detailed_description or source_url or grafana_incident_id):
             raise serializers.ValidationError(
-                f"alert_group_id and (title, message, source_url{', grafana_incident_id' if self.ALLOWS_GRAFANA_INCIDENT_ID else ''}) "
+                f"alert_group_id and (title, message, detailed_description, source_url{', grafana_incident_id' if self.ALLOWS_GRAFANA_INCIDENT_ID else ''}) "
                 "are mutually exclusive"
             )
 

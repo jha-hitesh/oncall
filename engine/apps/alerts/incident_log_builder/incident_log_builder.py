@@ -92,7 +92,6 @@ class IncidentLogBuilder:
         from apps.alerts.models import AlertGroupLogRecord, EscalationPolicy
 
         excluded_log_types = [
-            AlertGroupLogRecord.TYPE_ESCALATION_FINISHED,
             AlertGroupLogRecord.TYPE_INVITATION_TRIGGERED,
             AlertGroupLogRecord.TYPE_ACK_REMINDER_TRIGGERED,
             AlertGroupLogRecord.TYPE_WIPED,
@@ -128,6 +127,14 @@ class IncidentLogBuilder:
                     )
                 )
                 | Q(type__in=excluded_log_types)
+                | Q(
+                    Q(type=AlertGroupLogRecord.TYPE_ESCALATION_FINISHED)
+                    & ~Q(escalation_policy_step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE)
+                    & ~Q(
+                        escalation_policy_step__isnull=True,
+                        escalation_policy__step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+                    )
+                )
                 | Q(escalation_policy_step__in=excluded_escalation_steps)
                 | Q(  # new logs with saved escalation step
                     escalation_policy_step__isnull=True, escalation_policy__step__in=excluded_escalation_steps

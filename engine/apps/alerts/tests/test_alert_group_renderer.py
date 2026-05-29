@@ -1,9 +1,10 @@
 import pytest
 
+from apps.alerts.incident_appearance.renderers.phone_call_renderer import AlertGroupPhoneCallBundleRenderer
 from apps.alerts.incident_appearance.renderers.sms_renderer import AlertGroupSMSBundleRenderer
 from apps.alerts.incident_appearance.templaters import AlertSlackTemplater, AlertWebTemplater
 from apps.alerts.models import AlertGroup
-from apps.base.models import UserNotificationPolicy
+from apps.base.models import LiveSetting, UserNotificationPolicy
 from config_integrations import grafana
 
 
@@ -250,4 +251,65 @@ def test_alert_group_sms_bundle_renderer(
         f"#{alert_group_2.inside_organization_number}, #{alert_group_3.inside_organization_number} and 1 more "
         f"from stack: {organization.stack_slug}, "
         f"integrations: {alert_receive_channel_1.short_name} and 1 more."
+    )
+
+
+@pytest.mark.django_db
+def test_alert_group_sms_bundle_renderer_uses_live_settings_template(
+    settings,
+    make_organization_and_user,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_user_notification_bundle,
+):
+    settings.FEATURE_LIVE_SETTINGS_ENABLED = True
+
+    organization, user = make_organization_and_user()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    alert_group = make_alert_group(alert_receive_channel)
+    notification_bundle = make_user_notification_bundle(user, UserNotificationPolicy.NotificationChannel.SMS)
+    notification_bundle.append_notification(alert_group, None)
+
+    renderer = AlertGroupSMSBundleRenderer(notification_bundle.notifications.all())
+
+    LiveSetting.objects.update_or_create(
+        name="NOTIFICATION_BUNDLE_SMS_TEMPLATE",
+        defaults={"value": "First {{ total_alert_groups }} {{ stack_slug }} {{ channel_names[0] }}"},
+    )
+    assert renderer.render() == f"First 1 {organization.stack_slug} {alert_receive_channel.short_name}"
+
+    LiveSetting.objects.update_or_create(
+        name="NOTIFICATION_BUNDLE_SMS_TEMPLATE",
+        defaults={"value": "Second {{ total_alert_groups }} {{ stack_slug }} {{ channel_names[0] }}"},
+    )
+    assert renderer.render() == f"Second 1 {organization.stack_slug} {alert_receive_channel.short_name}"
+
+
+@pytest.mark.django_db
+def test_alert_group_phone_call_bundle_renderer(
+    make_organization_and_user,
+    make_alert_receive_channel,
+    make_alert_group,
+    make_user_notification_bundle,
+):
+    organization, user = make_organization_and_user()
+    alert_receive_channel_1 = make_alert_receive_channel(organization)
+    alert_receive_channel_2 = make_alert_receive_channel(organization)
+    alert_group_1 = make_alert_group(alert_receive_channel_1)
+    alert_group_2 = make_alert_group(alert_receive_channel_1)
+    alert_group_3 = make_alert_group(alert_receive_channel_1)
+    alert_group_4 = make_alert_group(alert_receive_channel_2)
+
+    notification_bundle = make_user_notification_bundle(user, UserNotificationPolicy.NotificationChannel.PHONE_CALL)
+    notification_bundle.append_notification(alert_group_1, None)
+    notification_bundle.append_notification(alert_group_2, None)
+    notification_bundle.append_notification(alert_group_3, None)
+    notification_bundle.append_notification(alert_group_4, None)
+
+    message = AlertGroupPhoneCallBundleRenderer(notification_bundle.notifications.all()).render()
+    assert message == (
+        f"Grafana OnCall. Alert groups #{alert_group_1.inside_organization_number}, "
+        f"#{alert_group_2.inside_organization_number}, #{alert_group_3.inside_organization_number} and 1 more. "
+        f"From stack {organization.stack_slug}. "
+        f"Triggered by integrations {alert_receive_channel_1.short_name} and 1 more."
     )

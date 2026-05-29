@@ -18,6 +18,10 @@ VIEWS_REQUIRING_USER_AUTH = (
 )
 
 
+def resolve_required_permissions(required_perms):
+    return required_perms() if callable(required_perms) else required_perms
+
+
 @pytest.mark.parametrize(
     "rbac_enabled,role,give_perm",
     [
@@ -61,6 +65,7 @@ def test_rbac_permissions(
             # old actions (webhooks) are deprecated, no RBAC support
             continue
         for viewset_method_name, required_perms in viewset.rbac_permissions.items():
+            required_perms = resolve_required_permissions(required_perms)
             # setup user's role and permissions
             if rbac_enabled:
                 # set the user's role to None and assign the permission or not based on the flag
@@ -153,6 +158,7 @@ def test_service_account_auth(
             # old actions (webhooks) are deprecated, no RBAC or service account support
             continue
         for viewset_method_name, required_perms in viewset.rbac_permissions.items():
+            required_perms = resolve_required_permissions(required_perms)
             # setup Grafana API permissions response
             permissions = {"perm": "value"}
             expected = status.HTTP_403_FORBIDDEN

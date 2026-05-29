@@ -29,6 +29,19 @@ DEV_HELM_USER_SPECIFIC_FILE = $(DEV_ENV_DIR)/helm-local.dev.yml
 
 ENGINE_DIR = ./engine
 VENV_DIR = ./venv
+GO_BUILD_CACHE_DIR = $(abspath ./.cache/go-build)
+GO_MOD_CACHE_DIR = $(abspath ./.cache/go-mod)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),arm64)
+PLUGIN_GOARCH = arm64
+PLUGIN_MAGE_TARGET = build:linuxARM64
+else ifeq ($(UNAME_M),aarch64)
+PLUGIN_GOARCH = arm64
+PLUGIN_MAGE_TARGET = build:linuxARM64
+else
+PLUGIN_GOARCH = amd64
+PLUGIN_MAGE_TARGET = build:linux
+endif
 REQUIREMENTS_DEV_IN = $(ENGINE_DIR)/requirements-dev.in
 REQUIREMENTS_DEV_TXT = $(ENGINE_DIR)/requirements-dev.txt
 REQUIREMENTS_IN = $(ENGINE_DIR)/requirements.in
@@ -134,7 +147,7 @@ cluster/down: ## (beta) delete local development k8s cluster
 	ctlptl delete -f dev/kind-config.yaml
 
 start:  ## start all of the docker containers
-	$(call run_docker_compose_command,up --remove-orphans -d)
+	$(call run_docker_compose_command,up --remove-orphans)
 
 init:  ## build the frontend plugin code then run make start
 # if the oncall UI is to be run in docker we should do an initial build of the frontend code
@@ -142,6 +155,8 @@ init:  ## build the frontend plugin code then run make start
 # restart the grafana container initially
 ifeq ($(findstring $(UI_PROFILE),$(COMPOSE_PROFILES)),$(UI_PROFILE))
 	$(call run_ui_docker_command,pnpm install && pnpm build:dev)
+	mkdir -p $(GO_BUILD_CACHE_DIR) $(GO_MOD_CACHE_DIR)
+	cd grafana-plugin && GOCACHE=$(GO_BUILD_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE_DIR) go run github.com/magefile/mage -v $(PLUGIN_MAGE_TARGET)
 endif
 
 stop:  # stop all of the docker containers

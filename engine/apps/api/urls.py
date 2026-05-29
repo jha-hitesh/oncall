@@ -2,6 +2,8 @@ from django.urls import include, path, re_path
 
 from common.api_helpers.optional_slash_router import OptionalSlashRouter, optional_slash_path
 
+from apps.labels.urls import urlpatterns as labels_urlpatterns
+
 from .views import UserNotificationPolicyView, auth
 from .views.alert_group import AlertGroupView
 from .views.alert_group_table_settings import AlertGroupTableColumnsViewSet
@@ -13,8 +15,9 @@ from .views.direct_paging import DirectPagingAPIView
 from .views.escalation_chain import EscalationChainViewSet
 from .views.escalation_policy import EscalationPolicyView
 from .views.features import FeaturesAPIView
+from .views.google_calendar import CurrentOrganizationGoogleCalendarEventView
 from .views.integration_heartbeat import IntegrationHeartBeatView
-from .views.labels import AlertGroupLabelsViewSet, LabelsViewSet
+from .views.labels import AlertGroupLabelsViewSet
 from .views.live_setting import LiveSettingViewSet
 from .views.on_call_shifts import OnCallShiftView
 from .views.organization import (
@@ -70,6 +73,7 @@ router.register(r"shift_swaps", ShiftSwapViewSet, basename="shift_swap")
 
 urlpatterns = [
     path("", include(router.urls)),
+    *labels_urlpatterns,
     optional_slash_path("user", CurrentUserView.as_view(), name="api-user"),
     optional_slash_path("set_general_channel", SetDefaultSlackChannel.as_view(), name="set-default-slack-channel"),
     optional_slash_path("organization", CurrentOrganizationView.as_view(), name="api-organization"),
@@ -103,6 +107,11 @@ urlpatterns = [
     ),
     optional_slash_path("features", FeaturesAPIView.as_view(), name="features"),
     optional_slash_path(
+        "organization/google_calendar/events",
+        CurrentOrganizationGoogleCalendarEventView.as_view(),
+        name="api-organization-google-calendar-events",
+    ),
+    optional_slash_path(
         "preview_template_options", PreviewTemplateOptionsView.as_view(), name="preview_template_options"
     ),
     optional_slash_path("route_regex_debugger", RouteRegexDebuggerView.as_view(), name="route_regex_debugger"),
@@ -118,29 +127,6 @@ urlpatterns += [
     path(r"login/<backend>/", auth.overridden_login_social_auth, name="social-auth"),
     path(r"complete/<backend>/", auth.overridden_complete_social_auth, name="complete-social-auth"),
     path(r"disconnect/<backend>", auth.overridden_disconnect_social_auth, name="disconnect-social-auth"),
-]
-
-urlpatterns += [
-    re_path(r"^labels/keys/?$", LabelsViewSet.as_view({"get": "get_keys"}), name="get_keys"),
-    re_path(
-        r"^labels/id/(?P<key_id>[\w\-]+)/?$",
-        LabelsViewSet.as_view({"get": "get_key", "put": "rename_key"}),
-        name="get_update_key",
-    ),
-    re_path(
-        r"^labels/name/(?P<key_name>[\w\-]+)/?$",
-        LabelsViewSet.as_view({"get": "get_key_by_name"}),
-        name="get_key_by_name",
-    ),
-    re_path(
-        r"^labels/id/(?P<key_id>[\w\-]+)/values/?$", LabelsViewSet.as_view({"post": "add_value"}), name="add_value"
-    ),
-    re_path(
-        r"^labels/id/(?P<key_id>[\w\-]+)/values/(?P<value_id>[\w\-]+)/?$",
-        LabelsViewSet.as_view({"put": "rename_value", "get": "get_value"}),
-        name="get_update_value",
-    ),
-    re_path(r"^labels/?$", LabelsViewSet.as_view({"post": "create_label"}), name="create_label"),
 ]
 
 # Alert group labels

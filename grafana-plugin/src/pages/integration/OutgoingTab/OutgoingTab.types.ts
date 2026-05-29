@@ -19,6 +19,8 @@ export interface OutgoingTabFormValues {
   http_method: string;
   data?: string;
   trigger_template?: string;
+  add_response_to_timeline?: boolean;
+  response_template?: string;
 
   // For UI only
   triggerTemplateToogle?: boolean;

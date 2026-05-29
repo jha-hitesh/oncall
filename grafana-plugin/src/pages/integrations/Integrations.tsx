@@ -61,7 +61,7 @@ const TABS = [
     value: TabType.MonitoringSystems,
   },
   {
-    label: 'Manual Direct Paging',
+    label: 'Direct Paging',
     value: TabType.DirectPaging,
   },
 ];

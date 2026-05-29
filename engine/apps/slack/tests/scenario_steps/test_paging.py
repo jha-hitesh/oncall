@@ -9,6 +9,8 @@ from apps.api.permissions import LegacyAccessControlRole
 from apps.schedules.models import CustomOnCallShift, OnCallScheduleWeb
 from apps.slack.chatops_proxy_routing import make_private_metadata, make_value
 from apps.slack.scenarios.paging import (
+    DIRECT_PAGING_DETAILED_DESCRIPTION_INPUT_ID,
+    DIRECT_PAGING_DYNAMIC_LABEL_INPUT_ID,
     DIRECT_PAGING_MESSAGE_INPUT_ID,
     DIRECT_PAGING_ORG_SELECT_ID,
     DIRECT_PAGING_TEAM_SELECT_ID,
@@ -16,6 +18,7 @@ from apps.slack.scenarios.paging import (
     DIRECT_PAGING_USER_SELECT_ID,
     DataKey,
     FinishDirectPaging,
+    OnPagingDynamicLabelChange,
     OnPagingItemActionChange,
     OnPagingOrgChange,
     OnPagingTeamChange,
@@ -34,6 +37,8 @@ def make_paging_view_slack_payload(
     predefined_org=None,
     team=None,
     important_team_escalation=False,
+    detailed_description=None,
+    dynamic_label_values=None,
     user=None,
     current_users=None,
     actions=None,
@@ -94,10 +99,17 @@ def make_paging_view_slack_payload(
                         }
                     },
                     DIRECT_PAGING_MESSAGE_INPUT_ID: {FinishDirectPaging.routing_uid(): {"value": "The Message"}},
+                    DIRECT_PAGING_DETAILED_DESCRIPTION_INPUT_ID: {
+                        FinishDirectPaging.routing_uid(): {"value": detailed_description}
+                    },
                 }
             },
         },
     }
+    for key_id, selected_option in (dynamic_label_values or {}).items():
+        payload["view"]["state"]["values"][f"{DIRECT_PAGING_DYNAMIC_LABEL_INPUT_ID}_{key_id}"] = {
+            OnPagingDynamicLabelChange.routing_uid(): {"selected_option": selected_option}
+        }
     if actions is not None:
         payload["actions"] = actions
     return payload
@@ -157,8 +169,10 @@ def test_page_team_with_predefined_org(make_organization_and_user_with_slack_ide
         organization=organization,
         from_user=user,
         message="The Message",
+        detailed_description=None,
         team=team,
         important_team_escalation=False,
+        dynamic_labels_map={},
         users=[],
     )
 
@@ -402,8 +416,10 @@ def test_trigger_paging_additional_responders(make_organization_and_user_with_sl
         organization=organization,
         from_user=user,
         message="The Message",
+        detailed_description=None,
         team=team,
         important_team_escalation=False,
+        dynamic_labels_map={},
         users=[(user, True)],
     )
 
@@ -428,8 +444,10 @@ def test_page_team(make_organization_and_user_with_slack_identities, make_team, 
         organization=organization,
         from_user=user,
         message="The Message",
+        detailed_description=None,
         team=team,
         important_team_escalation=important_team_escalation,
+        dynamic_labels_map={},
         users=[],
     )
 
@@ -607,3 +625,55 @@ def test_get_team_select_blocks(
         _contstruct_team_option(team)["value"]
     )
     assert context_block["elements"][0]["text"] == info_msg
+
+
+@pytest.mark.django_db
+def test_page_team_with_detailed_description_and_dynamic_labels(
+    make_organization_and_user_with_slack_identities,
+    make_team,
+    make_alert_receive_channel,
+    make_label_key,
+    make_label_value,
+):
+    organization, user, slack_team_identity, slack_user_identity = make_organization_and_user_with_slack_identities()
+    team = make_team(organization)
+    label_key = make_label_key(organization=organization, key_name="service")
+    label_value = make_label_value(label_key, value_name="checkout")
+    arc = make_alert_receive_channel(organization, team=team, integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING)
+    arc.alert_group_labels_custom = [[label_key.id, None, "{{ payload.dynamic_labels_map.service }}"]]
+    arc.save(update_fields=["alert_group_labels_custom"])
+
+    payload = make_paging_view_slack_payload(
+        selected_org=organization,
+        team=team,
+        detailed_description="More context",
+        dynamic_label_values={
+            label_key.id: {
+                "text": {"type": "plain_text", "text": label_value.name, "emoji": True},
+                "value": json.dumps(
+                    {
+                        "key_id": label_key.id,
+                        "key_name": label_key.name,
+                        "value_id": label_value.id,
+                        "value_name": label_value.name,
+                    }
+                ),
+            }
+        },
+    )
+
+    step = FinishDirectPaging(slack_team_identity)
+    with patch("apps.slack.scenarios.paging.direct_paging") as mock_direct_paging:
+        with patch.object(step._slack_client, "api_call"):
+            step.process_scenario(slack_user_identity, slack_team_identity, payload)
+
+    mock_direct_paging.assert_called_once_with(
+        organization=organization,
+        from_user=user,
+        message="The Message",
+        detailed_description="More context",
+        team=team,
+        important_team_escalation=False,
+        dynamic_labels_map={"service": "checkout"},
+        users=[],
+    )

@@ -1,17 +1,11 @@
-import logging
 import typing
 
-from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.utils import timezone
 
-from apps.labels.client import LabelsAPIClient, LabelsRepoAPIException
 from apps.labels.types import LabelOption, LabelPair
 from apps.labels.utils import LABEL_OUTDATED_TIMEOUT_MINUTES, get_associating_label_model
 from common.custom_celery_tasks import shared_dedicated_queue_retry_task
-
-logger = get_task_logger(__name__)
-logger.setLevel(logging.DEBUG)
 
 MAX_RETRIES = 1 if settings.DEBUG else 10
 
@@ -132,11 +126,9 @@ def _update_labels_cache(values_id_to_pair: typing.Dict[str, LabelPair]):
 
 @shared_dedicated_queue_retry_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=MAX_RETRIES)
 def update_instances_labels_cache(organization_id: int, instance_ids: typing.List[int], instance_model_name: str):
-    from apps.labels.models import LabelValueCache
-    from apps.user_management.models import Organization
+    from apps.labels.models import LabelKeyCache, LabelValueCache
 
     now = timezone.now()
-    organization = Organization.objects.get(id=organization_id)
 
     model = get_associating_label_model(instance_model_name)
     field_name = model.get_associating_label_field_name()
@@ -149,19 +141,8 @@ def update_instances_labels_cache(organization_id: int, instance_ids: typing.Lis
         return
 
     keys_ids = set(value.key_id for value in values)
-
-    client = LabelsAPIClient(organization.grafana_url, organization.api_token)
-    for key_id in keys_ids:
-        try:
-            label_option, _ = client.get_label_by_key_id(key_id)
-        except LabelsRepoAPIException as e:
-            logger.warning(
-                f"Error on get label data: organization: {organization_id}, key_id {key_id}, error: {e}, "
-                f"error message: {e.msg}"
-            )
-            continue
-        if label_option:
-            update_label_option_cache.apply_async((label_option,))
+    values.update(last_synced=now)
+    LabelKeyCache.objects.filter(id__in=keys_ids).update(last_synced=now)
 
 
 @shared_dedicated_queue_retry_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=MAX_RETRIES)

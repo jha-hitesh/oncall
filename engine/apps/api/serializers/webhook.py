@@ -61,6 +61,8 @@ class WebhookSerializer(LabelsSerializerMixin, serializers.ModelSerializer):
             "url",
             "data",
             "forward_all",
+            "add_response_to_timeline",
+            "response_template",
             "http_method",
             "trigger_type",
             "trigger_type_name",
@@ -142,6 +144,11 @@ class WebhookSerializer(LabelsSerializerMixin, serializers.ModelSerializer):
         if not headers:
             return None
         return self._validate_template_field(headers)
+
+    def validate_response_template(self, response_template):
+        if not response_template:
+            return None
+        return self._validate_template_field(response_template)
 
     def validate_url(self, url):
         if self.is_field_controlled("url"):

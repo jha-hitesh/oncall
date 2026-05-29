@@ -36,20 +36,25 @@ class DirectPagingUserTeamValidationError(Exception):
 class _OnCall(typing.TypedDict):
     title: str
     message: str
+    detailed_description: str | None
     uid: str
     author_username: str
-    permalink: str
+    permalink: str | None
+    important: bool
 
 
 class DirectPagingAlertPayload(typing.TypedDict):
     oncall: _OnCall
+    dynamic_labels_map: dict[str, str]
 
 
 def _trigger_alert(
     organization: Organization,
     team: Team | None,
     important_team_escalation: bool,
+    dynamic_labels_map: dict[str, str] | None,
     message: str,
+    detailed_description: str | None,
     title: str,
     permalink: str | None,
     grafana_incident_id: str | None,
@@ -80,6 +85,7 @@ def _trigger_alert(
         "oncall": {
             "title": title,
             "message": message,
+            "detailed_description": detailed_description,
             "uid": str(uuid4()),  # avoid grouping
             "author_username": from_user.username,
             "permalink": permalink,
@@ -91,6 +97,7 @@ def _trigger_alert(
             # escalation chains
             "important": important_team_escalation,
         },
+        "dynamic_labels_map": dynamic_labels_map or {},
     }
 
     alert = Alert.create(
@@ -133,10 +140,12 @@ def direct_paging(
     from_user: User,
     message: str,
     title: str | None = None,
+    detailed_description: str | None = None,
     source_url: str | None = None,
     grafana_incident_id: str | None = None,
     team: Team | None = None,
     important_team_escalation: bool = False,
+    dynamic_labels_map: dict[str, str] | None = None,
     users: UserNotifications | None = None,
     alert_group: AlertGroup | None = None,
 ) -> AlertGroup | None:
@@ -158,6 +167,7 @@ def direct_paging(
     # https://github.com/grafana/oncall-private/issues/2760
     title = escape_html(title)
     message = escape_html(message)
+    detailed_description = escape_html(detailed_description)
 
     if title is None:
         title = _construct_title(from_user, team, users)
@@ -169,7 +179,9 @@ def direct_paging(
                 organization,
                 team,
                 important_team_escalation,
+                dynamic_labels_map,
                 message,
+                detailed_description,
                 title,
                 source_url,
                 grafana_incident_id,

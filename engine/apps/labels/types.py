@@ -6,6 +6,7 @@ class LabelKey(typing.TypedDict):
     id: str
     name: str
     prescribed: bool
+    color_code: str
 
 
 # LabelValue represents one of the values associated with the LabelKey from label repo
@@ -13,6 +14,7 @@ class LabelValue(typing.TypedDict):
     id: str
     name: str
     prescribed: bool
+    color_code: str
 
 
 # Label Pair is a KV pair identifying one label.

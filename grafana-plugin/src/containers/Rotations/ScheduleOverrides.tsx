@@ -5,7 +5,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { Button, Stack, Tooltip, withTheme2 } from '@grafana/ui';
 import dayjs from 'dayjs';
 import { HTML_ID } from 'helpers/DOM';
-import { UserActions } from 'helpers/authorization/authorization';
+import { getScheduleManagementWriteUserAction } from 'helpers/authorization/authorization';
 import { observer } from 'mobx-react';
 import { CSSTransition, TransitionGroup } from 'react-transition-group';
 
@@ -94,6 +94,9 @@ class _ScheduleOverrides extends Component<ScheduleOverridesProps, ScheduleOverr
     const currentTimeHidden = currentTimeX < 0 || currentTimeX > 1;
 
     const schedule = store.scheduleStore.items[scheduleId];
+    const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+      store.organizationStore.currentOrganization?.schedule_management_require_admin
+    );
 
     const isTypeReadOnly = !schedule?.enable_web_overrides;
 
@@ -126,7 +129,7 @@ class _ScheduleOverrides extends Component<ScheduleOverridesProps, ScheduleOverr
                     </div>
                   </Tooltip>
                 ) : (
-                  <WithPermissionControlTooltip userAction={UserActions.SchedulesWrite}>
+                  <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
                     <Button disabled={disabled} icon="plus" onClick={this.handleAddOverride} variant="secondary">
                       Add override
                     </Button>

@@ -2,6 +2,7 @@ import json
 import math
 import typing
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.db.models import Count, Max, Q
@@ -21,10 +22,11 @@ from apps.alerts.incident_appearance.templaters import (
     AlertWebTemplater,
     TemplateLoader,
 )
+from apps.labels.alert_group_labels import gather_alert_labels
 from apps.alerts.models import Alert, AlertGroup
 from apps.base.messaging import get_messaging_backends
 from common.api_helpers.exceptions import BadRequest
-from common.jinja_templater import apply_jinja_template
+from common.jinja_templater import apply_jinja_template, apply_jinja_template_to_alert_payload_and_labels
 from common.jinja_templater.apply_jinja_template import JinjaTemplateError, JinjaTemplateWarning
 
 X_INSTANCE_CONTEXT = "X-Instance-Context"
@@ -251,6 +253,8 @@ SOURCE_LINK = "source_link"
 ROUTE = "route"
 ALERT_GROUP_MULTI_LABEL = "alert_group_multi_label"
 ALERT_GROUP_DYNAMIC_LABEL = "alert_group_dynamic_label"
+CREATE_CUSTOM_CHANNEL = "create_custom_channel"
+CHANNEL_PAYLOAD = "channel_payload"
 
 NOTIFICATION_CHANNEL_TO_TEMPLATER_MAP = {
     SLACK: AlertSlackTemplater,
@@ -267,11 +271,14 @@ for _, backend in get_messaging_backends():
         NOTIFICATION_CHANNEL_TO_TEMPLATER_MAP[backend.slug] = backend.get_templater_class()
 
 APPEARANCE_TEMPLATE_NAMES = [TITLE, MESSAGE, IMAGE_URL]
+GOOGLE_CALENDAR_TEMPLATE_NAMES = [TITLE, "description"]
 BEHAVIOUR_TEMPLATE_NAMES = [
     RESOLVE_CONDITION,
     ACKNOWLEDGE_CONDITION,
     GROUPING_ID,
     SOURCE_LINK,
+    CREATE_CUSTOM_CHANNEL,
+    CHANNEL_PAYLOAD,
     ROUTE,
     ALERT_GROUP_MULTI_LABEL,
     ALERT_GROUP_DYNAMIC_LABEL,
@@ -322,15 +329,18 @@ class PreviewTemplateMixin:
         notification_channel, attr_name = self.parse_name_and_notification_channel(template_name)
         if attr_name is None:
             raise BadRequest(detail={"template_name": "Template name is missing"})
-        if attr_name not in ALL_TEMPLATE_NAMES:
+        is_google_calendar_template = self.is_supported_google_calendar_template(notification_channel, attr_name)
+        if attr_name not in ALL_TEMPLATE_NAMES and not is_google_calendar_template:
             raise BadRequest(detail={"template_name": "Unknown template name"})
-        if attr_name in APPEARANCE_TEMPLATE_NAMES:
+        if attr_name in APPEARANCE_TEMPLATE_NAMES and not is_google_calendar_template:
             if notification_channel is None:
                 raise BadRequest(detail={"notification_channel": "notification_channel is required"})
             if notification_channel not in NOTIFICATION_CHANNEL_OPTIONS:
                 raise BadRequest(detail={"notification_channel": "Unknown notification_channel"})
+        elif attr_name not in BEHAVIOUR_TEMPLATE_NAMES and not is_google_calendar_template:
+            raise BadRequest(detail={"template_name": "Unknown template name"})
 
-        if attr_name in APPEARANCE_TEMPLATE_NAMES:
+        if attr_name in APPEARANCE_TEMPLATE_NAMES and not is_google_calendar_template:
 
             class PreviewTemplateLoader(TemplateLoader):
                 def get_attr_template(self, attr, alert_receive_channel, render_for=None):
@@ -348,6 +358,11 @@ class PreviewTemplateMixin:
                 return Response({"preview": e.fallback_message}, status.HTTP_200_OK)
 
             templated_attr = getattr(templated_alert, attr_name)
+        elif is_google_calendar_template:
+            try:
+                templated_attr = self.render_google_calendar_preview(template_body, alert_to_template)
+            except (JinjaTemplateError, JinjaTemplateWarning) as e:
+                return Response({"preview": e.fallback_message}, status.HTTP_200_OK)
 
         elif attr_name in BEHAVIOUR_TEMPLATE_NAMES:
             try:
@@ -381,7 +396,25 @@ class PreviewTemplateMixin:
                     destination = notification_channel
                     attr_name = template_param[len(destination) + 1 :]
                     break
+        elif template_param.startswith("google_calendar_"):
+            destination = "google_calendar"
+            attr_name = template_param[len(destination) + 1 :]
         return destination, attr_name
+
+    @staticmethod
+    def is_supported_google_calendar_template(notification_channel, attr_name):
+        return (
+            settings.GOOGLE_OAUTH2_ENABLED
+            and notification_channel == "google_calendar"
+            and attr_name in GOOGLE_CALENDAR_TEMPLATE_NAMES
+        )
+
+    def render_google_calendar_preview(self, template_body, alert_to_template):
+        alert_receive_channel = self.get_object()
+        labels = gather_alert_labels(alert_receive_channel, alert_to_template.raw_request_data)
+        return apply_jinja_template_to_alert_payload_and_labels(
+            template_body, payload=alert_to_template.raw_request_data, labels=labels
+        )
 
 
 class GrafanaContext(typing.TypedDict):

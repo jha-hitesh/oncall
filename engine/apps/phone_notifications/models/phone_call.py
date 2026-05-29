@@ -33,6 +33,7 @@ class PhoneCallRecord(models.Model):
         "alerts.Alert", on_delete=models.SET_NULL, null=True, default=None
     )  # deprecateed
     represents_alert_group = models.ForeignKey("alerts.AlertGroup", on_delete=models.SET_NULL, null=True, default=None)
+    represents_bundle_uuid = models.CharField(max_length=100, null=True, default=None, db_index=True)
     notification_policy = models.ForeignKey(
         "base.UserNotificationPolicy", on_delete=models.SET_NULL, null=True, default=None
     )

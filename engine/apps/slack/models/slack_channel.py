@@ -9,6 +9,7 @@ from common.public_primary_keys import generate_public_primary_key, increase_pub
 if typing.TYPE_CHECKING:
     from django.db.models.manager import RelatedManager
 
+    from apps.alerts.models import AlertGroup
     from apps.slack.models import SlackMessage, SlackTeamIdentity
 
 
@@ -27,6 +28,7 @@ def generate_public_primary_key_for_slack_channel():
 
 
 class SlackChannel(models.Model):
+    alert_group: typing.Optional["AlertGroup"]
     slack_team_identity: "SlackTeamIdentity"
     slack_messages: "RelatedManager['SlackMessage']"
 
@@ -42,6 +44,13 @@ class SlackChannel(models.Model):
         "slack.SlackTeamIdentity",
         on_delete=models.PROTECT,
         related_name="cached_channels",
+        null=True,
+        default=None,
+    )
+    alert_group = models.ForeignKey(
+        "alerts.AlertGroup",
+        on_delete=models.SET_NULL,
+        related_name="slack_channels",
         null=True,
         default=None,
     )

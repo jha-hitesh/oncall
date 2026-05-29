@@ -10,6 +10,7 @@
 npm-debug.log*
 pnpm-debug.log*
 pnpm-error.log*
+.pnpm-store
 
 # This file is generated
 grafana-plugin.yml

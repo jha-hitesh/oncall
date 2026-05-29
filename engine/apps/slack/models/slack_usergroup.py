@@ -1,5 +1,7 @@
 import logging
+import ssl
 import typing
+from urllib.error import URLError
 
 import requests
 from django.conf import settings
@@ -82,7 +84,8 @@ class SlackUserGroup(models.Model):
         try:
             sc.usergroups_update(usergroup=self.slack_id)
             return True
-        except (SlackAPIError, requests.exceptions.Timeout):
+        except (SlackAPIError, requests.exceptions.Timeout, URLError, ssl.SSLError) as err:
+            logger.warning("Unable to verify Slack user group update capability for %s: %s", self.slack_id, err)
             return False
 
     @property

@@ -2,6 +2,7 @@ import json
 from unittest.mock import ANY, Mock, patch
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -12,7 +13,7 @@ from apps.alerts.grafana_alerting_sync_manager import GrafanaAlertingSyncManager
 from apps.alerts.models import AlertReceiveChannel, EscalationPolicy
 from apps.api.permissions import LegacyAccessControlRole
 from apps.base.messaging import load_backend
-from apps.labels.models import LabelKeyCache
+from apps.labels.models import DEFAULT_LABEL_COLOR_CODE, LabelKeyCache
 from common.exceptions import BacksyncIntegrationRequestError
 
 
@@ -885,6 +886,42 @@ def test_alert_receive_channel_preview_template_dynamic_payload_custom_backends(
 
 
 @pytest.mark.django_db
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+@pytest.mark.parametrize(
+    ("template_name", "template_body", "expected_preview"),
+    [
+        ("google_calendar_title_template", "{{ payload.foo }}", "bar"),
+        ("google_calendar_description_template", "{{ payload.bar }}", "baz"),
+    ],
+)
+def test_alert_receive_channel_preview_template_google_calendar(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+    template_name,
+    template_body,
+    expected_preview,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(organization)
+
+    client = APIClient()
+    url = reverse(
+        "api-internal:alert_receive_channel-preview-template", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+    data = {
+        "template_body": template_body,
+        "template_name": template_name,
+        "payload": {"foo": "bar", "bar": "baz"},
+    }
+
+    response = client.post(url, data=data, format="json", **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["preview"] == expected_preview
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize(
     "role,expected_status",
     [
@@ -1052,6 +1089,26 @@ def test_cant_create_alert_receive_channels_direct_paging(
 
 
 @pytest.mark.django_db
+def test_can_create_alert_receive_channels_direct_paging_when_feature_enabled(
+    settings, make_organization_and_user_with_plugin_token, make_user_auth_headers
+):
+    settings.FEATURE_ALLOW_DIRECT_PAGING_CREATION = True
+    organization, user, token = make_organization_and_user_with_plugin_token()
+
+    client = APIClient()
+    url = reverse("api-internal:alert_receive_channel-list")
+    response = client.post(
+        url,
+        data={"integration": "direct_paging", "verbal_name": "Direct paging from UI"},
+        format="json",
+        **make_user_auth_headers(user, token),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.json()["integration"] == AlertReceiveChannel.INTEGRATION_DIRECT_PAGING
+
+
+@pytest.mark.django_db
 def test_update_alert_receive_channels_direct_paging(
     make_organization_and_user_with_plugin_token, make_team, make_alert_receive_channel, make_user_auth_headers
 ):
@@ -1084,18 +1141,36 @@ def test_cant_delete_direct_paging_integration(
     organization, user, token = make_organization_and_user_with_plugin_token()
     integration = make_alert_receive_channel(organization, integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING)
 
-    # check allow_delete is False (so the frontend can hide the delete button)
+    # check allow_delete is False so the UI can hide the delete action while the feature is off
     client = APIClient()
     url = reverse("api-internal:alert_receive_channel-detail", kwargs={"pk": integration.public_primary_key})
     response = client.get(url, **make_user_auth_headers(user, token))
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["allow_delete"] is False
 
-    # check delete is not allowed
+    # check delete is not allowed while the feature is off
     client = APIClient()
     url = reverse("api-internal:alert_receive_channel-detail", kwargs={"pk": integration.public_primary_key})
     response = client.delete(url, **make_user_auth_headers(user, token))
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+def test_can_delete_direct_paging_integration_when_feature_enabled(
+    settings, make_organization_and_user_with_plugin_token, make_alert_receive_channel, make_user_auth_headers
+):
+    settings.FEATURE_ALLOW_DIRECT_PAGING_INTEGRATION_DELETION = True
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    integration = make_alert_receive_channel(organization, integration=AlertReceiveChannel.INTEGRATION_DIRECT_PAGING)
+
+    client = APIClient()
+    url = reverse("api-internal:alert_receive_channel-detail", kwargs={"pk": integration.public_primary_key})
+    response = client.get(url, **make_user_auth_headers(user, token))
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["allow_delete"] is True
+
+    response = client.delete(url, **make_user_auth_headers(user, token))
+    assert response.status_code == status.HTTP_204_NO_CONTENT
 
 
 @pytest.mark.django_db
@@ -1693,12 +1768,32 @@ def test_alert_group_labels_get(
         "inheritable": {label.key_id: True},
         "custom": [
             {
-                "key": {"id": label_key.id, "name": label_key.name, "prescribed": False},
-                "value": {"id": label_value.id, "name": label_value.name, "prescribed": False},
+                "key": {
+                    "id": label_key.id,
+                    "name": label_key.name,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": label_value.id,
+                    "name": label_value.name,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
             {
-                "key": {"id": label_key_1.id, "name": label_key_1.name, "prescribed": False},
-                "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                "key": {
+                    "id": label_key_1.id,
+                    "name": label_key_1.name,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.foo }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
         ],
         "template": template,
@@ -1719,7 +1814,7 @@ def test_alert_group_labels_put(
     label_3 = make_static_label_config(organization, alert_receive_channel)
 
     custom = [
-        # static label (deprecated, will be skipped)
+        # static label (deprecated, but still supported for backward compatibility)
         {
             "key": {"id": label_2.key.id, "name": label_2.key.name, "prescribed": False},
             "value": {"id": label_2.value.id, "name": label_2.value.name, "prescribed": False},
@@ -1753,20 +1848,54 @@ def test_alert_group_labels_put(
         "inheritable": {label_1.key_id: True, label_2.key_id: True, label_3.key_id: True},
         "custom": [
             {
-                "key": {"id": label_3.key.id, "name": label_3.key.name, "prescribed": False},
-                "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                "key": {
+                    "id": label_2.key.id,
+                    "name": label_2.key.name,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": label_2.value.id,
+                    "name": label_2.value.name,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
             {
-                "key": {"id": "hello", "name": "world", "prescribed": False},
-                "value": {"id": None, "name": "{{ payload.bar }}", "prescribed": False},
+                "key": {
+                    "id": label_3.key.id,
+                    "name": label_3.key.name,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.foo }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+            },
+            {
+                "key": {
+                    "id": "hello",
+                    "name": "world",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.bar }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
         ],
         "template": template,
     }
 
     alert_receive_channel.refresh_from_db()
-    # check deprecated static label is not in the custom labels list
     assert alert_receive_channel.alert_group_labels_custom == [
+        [label_2.key_id, label_2.value_id, None],
         [label_3.key_id, None, "{{ payload.foo }}"],
         ["hello", None, "{{ payload.bar }}"],
     ]
@@ -1800,20 +1929,37 @@ def test_alert_group_labels_post(alert_receive_channel_internal_api_setup, make_
 
     labels = [
         {
-            "key": {"id": "test", "name": "test", "prescribed": False},
-            "value": {"id": "123", "name": "123", "prescribed": False},
+            "key": {"id": "test", "name": "test", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+            "value": {"id": "123", "name": "123", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+        }
+    ]
+    expected_labels_response = [
+        {
+            "key": {
+                "id": "test",
+                "name": "test",
+                "prescribed": False,
+                "is_managed_label": False,
+                "color_code": DEFAULT_LABEL_COLOR_CODE,
+            },
+            "value": {"id": "123", "name": "123", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
         }
     ]
     alert_group_labels = {
         "inheritable": {"test": False},
         "custom": [
             {
-                "key": {"id": "test", "name": "test", "prescribed": False},
-                "value": {"id": "123", "name": "123", "prescribed": False},
+                "key": {"id": "test", "name": "test", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+                "value": {"id": "123", "name": "123", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
             },
             {
-                "key": {"id": "test2", "name": "test2", "prescribed": False},
-                "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                "key": {"id": "test2", "name": "test2", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.foo }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
         ],
         "template": "{{ payload.labels | tojson }}",
@@ -1822,8 +1968,17 @@ def test_alert_group_labels_post(alert_receive_channel_internal_api_setup, make_
         "inheritable": {"test": True},
         "custom": [
             {
-                "key": {"id": "test2", "name": "test2", "prescribed": False},
-                "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                "key": {"id": "test", "name": "test", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+                "value": {"id": "123", "name": "123", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+            },
+            {
+                "key": {"id": "test2", "name": "test2", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.foo }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             }
         ],
         "template": "{{ payload.labels | tojson }}",
@@ -1840,11 +1995,11 @@ def test_alert_group_labels_post(alert_receive_channel_internal_api_setup, make_
     response = client.post(url, data, format="json", **make_user_auth_headers(user, token))
 
     assert response.status_code == status.HTTP_201_CREATED
-    assert response.json()["labels"] == labels
+    assert response.json()["labels"] == expected_labels_response
     assert response.json()["alert_group_labels"] == expected_alert_group_labels
 
     alert_receive_channel = AlertReceiveChannel.objects.get(public_primary_key=response.json()["id"])
-    assert alert_receive_channel.alert_group_labels_custom == [["test2", None, "{{ payload.foo }}"]]
+    assert alert_receive_channel.alert_group_labels_custom == [["test", "123", None], ["test2", None, "{{ payload.foo }}"]]
     assert alert_receive_channel.alert_group_labels_template == "{{ payload.labels | tojson }}"
 
 
@@ -1885,12 +2040,27 @@ def test_create_service_name_label_for_new_alerting_integration(
         "inheritable": {},
         "custom": [
             {
-                "key": {"id": service_name_label_key.id, "name": SERVICE_LABEL, "prescribed": True},
-                "value": {"id": None, "name": SERVICE_LABEL_TEMPLATE_FOR_ALERTING_INTEGRATION, "prescribed": False},
+                "key": {
+                    "id": service_name_label_key.id,
+                    "name": SERVICE_LABEL,
+                    "prescribed": True,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": None,
+                    "name": SERVICE_LABEL_TEMPLATE_FOR_ALERTING_INTEGRATION,
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
             {
-                "key": {"id": "testid", "name": "testname", "prescribed": False},
-                "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                "key": {"id": "testid", "name": "testname", "prescribed": False, "color_code": DEFAULT_LABEL_COLOR_CODE},
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.foo }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             },
         ],
         "template": None,
@@ -1940,8 +2110,18 @@ def test_skip_creating_service_name_label_for_new_alerting_integration(
             "inheritable": {},
             "custom": [
                 {
-                    "key": {"id": service_name_label_key.id, "name": SERVICE_LABEL, "prescribed": True},
-                    "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                    "key": {
+                        "id": service_name_label_key.id,
+                        "name": SERVICE_LABEL,
+                        "prescribed": True,
+                        "color_code": DEFAULT_LABEL_COLOR_CODE,
+                    },
+                    "value": {
+                        "id": None,
+                        "name": "{{ payload.foo }}",
+                        "prescribed": False,
+                        "color_code": DEFAULT_LABEL_COLOR_CODE,
+                    },
                 }
             ],
             "template": None,
@@ -1951,8 +2131,18 @@ def test_skip_creating_service_name_label_for_new_alerting_integration(
         "inheritable": {},
         "custom": [
             {
-                "key": {"id": service_name_label_key.id, "name": SERVICE_LABEL, "prescribed": True},
-                "value": {"id": None, "name": "{{ payload.foo }}", "prescribed": False},
+                "key": {
+                    "id": service_name_label_key.id,
+                    "name": SERVICE_LABEL,
+                    "prescribed": True,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
+                "value": {
+                    "id": None,
+                    "name": "{{ payload.foo }}",
+                    "prescribed": False,
+                    "color_code": DEFAULT_LABEL_COLOR_CODE,
+                },
             }
         ],
         "template": None,

@@ -62,6 +62,7 @@ export const OutgoingWebhookFormFields: React.FC<OutgoingWebhookFormFieldsProps>
     } = useFormContext<ApiSchemas['Webhook']>();
 
     const forwardAll = watch(WebhookFormFieldName.ForwardAll);
+    const addResponseToTimeline = watch(WebhookFormFieldName.AddResponseToTimeline);
     const styles = useStyles2(getStyles);
 
     const controls = (
@@ -321,7 +322,6 @@ export const OutgoingWebhookFormFields: React.FC<OutgoingWebhookFormFieldsProps>
             </Field>
           )}
         />
-
         <RenderConditionally shouldRender={!preset?.controlled_fields.includes(WebhookFormFieldName.ForwardAll)}>
           <Field>
             <Controller
@@ -382,6 +382,63 @@ export const OutgoingWebhookFormFields: React.FC<OutgoingWebhookFormFieldsProps>
             )}
           />
         </RenderConditionally>
+
+        <Controller
+          name={WebhookFormFieldName.AddResponseToTimeline}
+          control={control}
+          render={({ field }) => (
+            <Field
+              label="Add response to timeline"
+              description="Add a timeline entry with the webhook response after the request completes."
+              invalid={Boolean(errors.add_response_to_timeline)}
+              error={errors.add_response_to_timeline?.message}
+            >
+              <Switch value={field.value} onChange={field.onChange} />
+            </Field>
+          )}
+        />
+        <RenderConditionally
+          shouldRender={
+            addResponseToTimeline && !preset?.controlled_fields.includes(WebhookFormFieldName.ResponseTemplate)
+          }
+          render={() => (
+            <Controller
+              name={WebhookFormFieldName.ResponseTemplate}
+              control={control}
+              render={({ field }) => (
+                <Field
+                  label="Response template"
+                  description="Optional Jinja template for rendering the webhook response in the timeline. Leave empty to use the original response body."
+                  invalid={Boolean(errors.response_template)}
+                  error={errors.response_template?.message}
+                >
+                  <div className={styles.formRow}>
+                    <div className={styles.formField}>
+                      <MonacoEditor
+                        data={{}}
+                        showLineNumbers={false}
+                        monacoOptions={MONACO_EDITABLE_CONFIG}
+                        value={field.value}
+                        onChange={field.onChange}
+                      />
+                    </div>
+                    <Button
+                      icon="edit"
+                      variant="secondary"
+                      onClick={() =>
+                        onTemplateEditClick({
+                          name: field.name,
+                          value: field.value,
+                          displayName: 'Webhook Response Template',
+                        })
+                      }
+                    />
+                  </div>
+                </Field>
+              )}
+            />
+          )}
+        />
       </>
     );
 

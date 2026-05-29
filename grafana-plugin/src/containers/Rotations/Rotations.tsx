@@ -5,7 +5,7 @@ import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { ValuePicker, Button, Tooltip, withTheme2, Stack } from '@grafana/ui';
 import dayjs from 'dayjs';
 import { HTML_ID } from 'helpers/DOM';
-import { UserActions } from 'helpers/authorization/authorization';
+import { getScheduleManagementWriteUserAction } from 'helpers/authorization/authorization';
 import { observer } from 'mobx-react';
 import { CSSTransition, TransitionGroup } from 'react-transition-group';
 
@@ -95,6 +95,9 @@ class _Rotations extends Component<RotationsProps, RotationsState> {
     const nextPriority = layers && layers.length ? layers[layers.length - 1].priority + 1 : 1;
 
     const schedule = store.scheduleStore.items[scheduleId];
+    const scheduleManagementWriteAction = getScheduleManagementWriteUserAction(
+      store.organizationStore.currentOrganization?.schedule_management_require_admin
+    );
 
     const isTypeReadOnly =
       schedule && (schedule?.type === ScheduleType.Ical || schedule?.type === ScheduleType.Calendar);
@@ -120,7 +123,7 @@ class _Rotations extends Component<RotationsProps, RotationsState> {
                       </div>
                     </Tooltip>
                   ) : (
-                    <WithPermissionControlTooltip userAction={UserActions.SchedulesWrite}>
+                    <WithPermissionControlTooltip userAction={scheduleManagementWriteAction}>
                       <Button variant="secondary" icon="plus" disabled>
                         Add rotation
                       </Button>

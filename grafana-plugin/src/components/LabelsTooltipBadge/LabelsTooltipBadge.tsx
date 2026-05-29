@@ -1,9 +1,9 @@
 import React, { FC } from 'react';
 
-import { LabelTag } from '@grafana/labels';
 import { Stack, Button, Tooltip } from '@grafana/ui';
 import { StackSize } from 'helpers/consts';
 
+import { ColoredLabelTag, toColoredLabelParts } from 'components/ColoredLabelTag/ColoredLabelTag';
 import { RenderConditionally } from 'components/RenderConditionally/RenderConditionally';
 import { TooltipBadge } from 'components/TooltipBadge/TooltipBadge';
 import { LabelKeyValue } from 'models/label/label.types';
@@ -25,7 +25,7 @@ export const LabelsTooltipBadge: FC<LabelsTooltipBadgeProps> = ({ labels, onClic
         <Stack direction="column" gap={StackSize.sm}>
           {labels.map((label) => (
             <Stack gap={StackSize.sm} key={label.key.id}>
-              <LabelTag label={label.key.name} value={label.value.name} />
+              <ColoredLabelTag {...toColoredLabelParts(label)} />
               <Button
                 size="sm"
                 icon="filter"
@@ -50,7 +50,7 @@ export const LabelBadges: React.FC<LabelBadgesProps> = ({ labels = [], maxCount 
     return (
       <Stack>
         {values.map((label) => (
-          <LabelTag key={label.key.id} label={label.key.name} value={label.value.name} />
+          <ColoredLabelTag key={label.key.id} {...toColoredLabelParts(label)} />
         ))}
       </Stack>
     );

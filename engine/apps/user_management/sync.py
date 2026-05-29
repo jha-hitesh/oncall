@@ -11,6 +11,7 @@ from apps.api.permissions import LegacyAccessControlRole
 from apps.auth_token.exceptions import InvalidToken
 from apps.grafana_plugin.helpers.client import GcomAPIClient, GCOMInstanceInfo, GrafanaAPIClient
 from apps.grafana_plugin.sync_data import SyncData, SyncPermission, SyncSettings, SyncTeam, SyncUser
+from apps.labels.utils import is_labels_feature_enabled
 from apps.metrics_exporter.helpers import metrics_bulk_update_team_label_cache
 from apps.metrics_exporter.metrics_cache_manager import MetricsCacheManager
 from apps.user_management.models import Organization, Team, User
@@ -63,11 +64,7 @@ def _sync_organization(organization: Organization) -> None:
             GrafanaAPIClient.GRAFANA_INCIDENT_PLUGIN_BACKEND_URL_KEY
         )
 
-    # get labels plugin settings
-    is_grafana_labels_enabled = False
-    grafana_labels_plugin_settings, _ = grafana_api_client.get_grafana_labels_plugin_settings()
-    if grafana_labels_plugin_settings is not None:
-        is_grafana_labels_enabled = grafana_labels_plugin_settings["enabled"]
+    is_grafana_labels_enabled = is_labels_feature_enabled(organization)
 
     # get IRM plugin settings
     is_grafana_irm_enabled = False

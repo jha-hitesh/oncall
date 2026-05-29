@@ -27,7 +27,7 @@ export const Connectors: FC<ConnectorsProps> = observer((props) => {
   return (
     <>
       <PhoneConnector {...props} />
-      <MobileAppConnector {...props} />
+      {store.hasFeature(AppFeature.CloudConnection) && <MobileAppConnector {...props} />}
       <SlackConnector {...props} />
       {store.hasFeature(AppFeature.Telegram) && <TelegramConnector {...props} />}
       {store.hasFeature(AppFeature.PersonalWebhook) && <PersonalWebhookConnector {...props} />}

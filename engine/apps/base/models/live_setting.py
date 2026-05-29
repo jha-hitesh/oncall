@@ -50,6 +50,10 @@ class LiveSetting(models.Model):
         "TWILIO_API_KEY_SECRET",
         "TWILIO_NUMBER",
         "TWILIO_VERIFY_SERVICE_SID",
+        "PHONE_CALL_INSTRUCTIONS_TEMPLATE",
+        "PHONE_CALL_INSTRUCTIONS_CONFIG",
+        "PHONE_CALL_ACTION_RESPONSE_TEMPLATE",
+        "NOTIFICATION_BUNDLE_SMS_TEMPLATE",
         "TELEGRAM_TOKEN",
         "TELEGRAM_WEBHOOK_HOST",
         "SLACK_CLIENT_OAUTH_ID",
@@ -109,6 +113,11 @@ class LiveSetting(models.Model):
             "Slack secrets can't be verified on the backend, please try installing the Slack Bot "
             "after you update them."
         ),
+        "PHONE_CALL_ACTION_RESPONSE_TEMPLATE": (
+            "Phone call action response messages (JSON object). "
+            "Controls default voice responses for phone-call actions (e.g., acknowledge/resolve/silence) "
+            "and the 'resolved recently' messaging."
+        ),
         "SLACK_CLIENT_OAUTH_SECRET": (
             "Check <a href='"
             "https://grafana.com/docs/oncall/latest/open-source/#slack-setup"
@@ -158,6 +167,20 @@ class LiveSetting(models.Model):
             "SID of Twilio service for number verification. "
             "You can create a service in Twilio web interface. "
             "twilio.com -> verify -> create new service."
+        ),
+        "PHONE_CALL_INSTRUCTIONS_TEMPLATE": (
+            "Twilio phone-call instructions template. Available placeholders: "
+            "acknowledge_button, resolve_button, silence_button, repeat_button, silence_in_minutes."
+        ),
+        "PHONE_CALL_INSTRUCTIONS_CONFIG": (
+            "Twilio phone-call instructions JSON config. Supported keys: "
+            "acknowledge_button, resolve_button, silence_button, repeat_button, "
+            "acknowledge_message, resolve_message, silence_message, "
+            "silence_in_minutes, wait_time_for_user_action."
+        ),
+        "NOTIFICATION_BUNDLE_SMS_TEMPLATE": (
+            "Bundled SMS notification template (Jinja2). Available placeholders: "
+            "total_alert_groups, total_channels, channel_names, alert_group_names, alert_group_codes, stack_slug."
         ),
         "TELEGRAM_TOKEN": (
             "Secret token for Telegram bot, you can get one via <a href='https://t.me/BotFather' target='_blank'>BotFather</a>."

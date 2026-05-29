@@ -58,6 +58,7 @@ class MessagingBackendTemplatesItem:
     title: str | None
     message: str | None
     image_url: str | None
+    description: str | None
 
 
 MessagingBackendTemplates = dict[str, MessagingBackendTemplatesItem]
@@ -76,6 +77,8 @@ class AlertmanagerV2LegacyTemplates(typing.TypedDict):
     slack_title_template: str | None
     slack_message_template: str | None
     slack_image_url_template: str | None
+    google_calendar_title_template: str | None
+    google_calendar_description_template: str | None
     telegram_title_template: str | None
     telegram_message_template: str | None
     telegram_image_url_template: str | None
@@ -133,6 +136,10 @@ class AlertReceiveChannelManager(models.Manager):
         from apps.alerts.models import ChannelFilter
 
         logger.info(f"Starting create_missing_direct_paging_integrations for organization: {organization.id}")
+
+        if not settings.FEATURE_AUTO_CREATE_DIRECT_PAGING_FOR_TEAMS:
+            logger.info("Automatic direct paging integration creation for teams is disabled. Exiting.")
+            return
 
         # fetch teams without direct paging integration
         teams_missing_direct_paging = list(
@@ -381,13 +388,17 @@ class AlertReceiveChannel(IntegrationOptionsMixin, MaintainableObject):
         return value
 
     def get_default_template_attribute(self, render_for, attr_name):
-        defaults = {}
         backend_id = render_for.upper()
-        # check backend exists
+        defaults = getattr(self, f"INTEGRATION_TO_DEFAULT_{backend_id}_{attr_name.upper()}_TEMPLATE", None)
+        if defaults is not None:
+            return defaults.get(self.integration)
+
         if get_messaging_backend_from_id(backend_id):
             # fallback to web defaults for now
             defaults = getattr(self, f"INTEGRATION_TO_DEFAULT_WEB_{attr_name.upper()}_TEMPLATE", {})
-        return defaults.get(self.integration)
+            return defaults.get(self.integration)
+
+        return None
 
     @classmethod
     def create(cls, **kwargs):

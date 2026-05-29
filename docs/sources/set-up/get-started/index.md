@@ -170,6 +170,19 @@ For more information on Escalation Chains and more ways to customize them, refer
 Routes define which messenger channels and escalation chains to use for notifications.
 For more information, refer to [Routes](ref:routes).
 
+### Connect Google Calendar for escalation workflows
+
+If you want an escalation chain to create Google Calendar events for responders, connect an organization-managed Google account first:
+
+1. Navigate to **Settings > Google Calendar**.
+2. Click **Connect Google account**.
+3. Complete the Google OAuth flow and grant the requested Calendar permissions.
+4. Return to your escalation chain and add the **Create calendar invite** step.
+5. Choose who should receive the invite: current on-call members, current escalation chain members, or current team members.
+
+Grafana OnCall uses this organization-level connection for calendar event creation and Google Meet links.
+It is separate from any per-user Google calendar connection used elsewhere in the product.
+
 ### Learn about the Alert Workflow
 
 * All Alerts in OnCall are grouped into Alert Groups.

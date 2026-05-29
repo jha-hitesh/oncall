@@ -16,7 +16,7 @@ import {
   useSceneApp,
 } from '@grafana/scenes';
 import { Alert, LoadingPlaceholder, Stack, useStyles2 } from '@grafana/ui';
-import { DOCS_ROOT, StackSize, PLUGIN_ROOT, IS_CURRENT_ENV_OSS } from 'helpers/consts';
+import { DOCS_ROOT, StackSize, PLUGIN_ROOT, IS_CURRENT_ENV_CLOUD } from 'helpers/consts';
 import { observer } from 'mobx-react';
 
 import { Text } from 'components/Text/Text';
@@ -45,14 +45,15 @@ export const Insights = observer(() => {
   } = useStore();
   const [datasource, setDatasource] = useState<string>();
   const { isAnyAlertCreatedMoreThan20SecsAgo, isFirstAlertCheckDone } = useAlertCreationChecker();
+  const allowDatasourceSelection = !IS_CURRENT_ENV_CLOUD;
 
   const config = useMemo(
     () => ({
-      isOpenSource: IS_CURRENT_ENV_OSS,
-      datasource: { uid: IS_CURRENT_ENV_OSS ? '$datasource' : insightsDatasource },
+      allowDatasourceSelection,
+      datasource: { uid: allowDatasourceSelection ? '$datasource' : insightsDatasource },
       stack: currentOrganization?.stack_slug,
     }),
-    [currentOrganization?.stack_slug]
+    [allowDatasourceSelection, currentOrganization?.stack_slug, insightsDatasource]
   );
 
   const variables = useMemo(() => getVariables(config), [config]);
@@ -67,15 +68,20 @@ export const Insights = observer(() => {
     if (!isAnyAlertCreatedMoreThan20SecsAgo) {
       return undefined;
     }
-    const dataSourceListener =
-      IS_CURRENT_ENV_OSS &&
-      variables.datasource.subscribeToState(({ text }) => {
-        setDatasource(`${text}`);
-      });
+    if (!allowDatasourceSelection) {
+      return undefined;
+    }
+
+    setDatasource(variables.datasource.state.text ? `${variables.datasource.state.text}` : undefined);
+
+    const dataSourceListener = variables.datasource.subscribeToState(({ text }) => {
+      setDatasource(`${text}`);
+    });
+
     return () => {
       dataSourceListener?.unsubscribe?.();
     };
-  }, [isAnyAlertCreatedMoreThan20SecsAgo]);
+  }, [allowDatasourceSelection, isAnyAlertCreatedMoreThan20SecsAgo, variables]);
 
   if (!isFirstAlertCheckDone) {
     return <LoadingPlaceholder text="Loading..." />;
@@ -85,7 +91,7 @@ export const Insights = observer(() => {
       <InsightsGeneralInfo />
       {isAnyAlertCreatedMoreThan20SecsAgo ? (
         <>
-          {IS_CURRENT_ENV_OSS && !datasource && <NoDatasourceWarning />}
+          {allowDatasourceSelection && !datasource && <NoDatasourceWarning />}
           <appScene.Component model={appScene} />
         </>
       ) : (

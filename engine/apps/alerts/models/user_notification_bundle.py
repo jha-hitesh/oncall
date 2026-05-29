@@ -1,6 +1,7 @@
 import datetime
 import typing
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -18,10 +19,6 @@ if typing.TYPE_CHECKING:
 class UserNotificationBundle(models.Model):
     user: "User"
     notifications: "RelatedManager['BundledNotification']"
-
-    NOTIFICATION_CHANNELS_TO_BUNDLE = [
-        UserNotificationPolicy.NotificationChannel.SMS,
-    ]
 
     user = models.ForeignKey("user_management.User", on_delete=models.CASCADE, related_name="notification_bundles")
     important = models.BooleanField()
@@ -67,8 +64,17 @@ class UserNotificationBundle(models.Model):
         )
 
     @classmethod
+    def get_notification_channels_to_bundle(cls):
+        notification_channels_to_bundle = []
+        for notification_channel_name in settings.FEATURE_NOTIFICATION_CHANNELS_TO_BUNDLE:
+            notification_channel = getattr(UserNotificationPolicy.NotificationChannel, notification_channel_name, None)
+            if notification_channel is not None:
+                notification_channels_to_bundle.append(notification_channel)
+        return notification_channels_to_bundle
+
+    @classmethod
     def notification_is_bundleable(cls, notification_channel):
-        return notification_channel in cls.NOTIFICATION_CHANNELS_TO_BUNDLE
+        return notification_channel in cls.get_notification_channels_to_bundle()
 
 
 class BundledNotification(models.Model):

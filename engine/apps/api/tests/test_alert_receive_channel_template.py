@@ -458,6 +458,194 @@ def test_update_alert_receive_channel_templates(
             assert updated_templates_data[template_name] == template_update_func(prev_template_value)
 
 
+@override_settings(FEATURE_SLACK_INTEGRATION_ENABLED=True, FEATURE_SLACK_CHANNEL_CREATION_ENABLED=True)
+@pytest.mark.django_db
+def test_alert_receive_channel_template_include_custom_slack_channel_templates(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(
+        organization,
+        messaging_backends_templates={
+            "SLACK": {
+                "create_custom_channel": "{{ payload.enabled }}",
+                "channel_payload": '{"name": "{{ alert_group.title | lower }}", "is_private": false}',
+            }
+        },
+    )
+    client = APIClient()
+
+    url = reverse(
+        "api-internal:alert_receive_channel_template-detail", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+
+    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    templates_data = response.json()
+    assert templates_data["slack_create_custom_channel_template"] == "{{ payload.enabled }}"
+    assert templates_data["slack_channel_payload_template"] == (
+        '{"name": "{{ alert_group.title | lower }}", "is_private": false}'
+    )
+
+
+@override_settings(FEATURE_SLACK_INTEGRATION_ENABLED=True, FEATURE_SLACK_CHANNEL_CREATION_ENABLED=True)
+@pytest.mark.django_db
+def test_update_alert_receive_channel_custom_slack_channel_templates(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(organization, messaging_backends_templates=None)
+    client = APIClient()
+
+    url = reverse(
+        "api-internal:alert_receive_channel_template-detail", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+
+    response = client.put(
+        url,
+        format="json",
+        data={
+            "slack_create_custom_channel_template": "{{ payload.enabled }}",
+            "slack_channel_payload_template": '{"name": "{{ alert_group.title | lower }}", "is_private": false}',
+        },
+        **make_user_auth_headers(user, token),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    alert_receive_channel.refresh_from_db()
+    assert alert_receive_channel.messaging_backends_templates["SLACK"] == {
+        "create_custom_channel": "{{ payload.enabled }}",
+        "channel_payload": '{"name": "{{ alert_group.title | lower }}", "is_private": false}',
+    }
+
+
+@override_settings(FEATURE_SLACK_INTEGRATION_ENABLED=True, FEATURE_SLACK_CHANNEL_CREATION_ENABLED=True)
+@pytest.mark.django_db
+def test_preview_alert_receive_channel_custom_slack_channel_payload_template(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+    make_channel_filter,
+    make_alert_group,
+    make_alert,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(organization)
+    default_channel_filter = make_channel_filter(alert_receive_channel, is_default=True)
+    alert_group = make_alert_group(alert_receive_channel, channel_filter=default_channel_filter)
+    make_alert(alert_group=alert_group, raw_request_data={"title": "alert!"}, title="Disk Full")
+    client = APIClient()
+
+    url = reverse(
+        "api-internal:alert_receive_channel-preview-template", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+
+    data = {
+        "template_body": '{"name": "{{ alert_group.title | lower }}", "is_private": false}',
+        "template_name": "slack_channel_payload_template",
+    }
+    response = client.post(url, format="json", data=data, **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {"preview": '{"name": "disk full", "is_private": false}', "is_valid_json_object": True}
+
+
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+@pytest.mark.django_db
+def test_alert_receive_channel_template_include_google_calendar_templates(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(
+        organization,
+        messaging_backends_templates={
+            "GOOGLE_CALENDAR": {
+                "title": "{{ payload.summary }}",
+                "description": "{{ payload.description }}",
+            }
+        },
+    )
+    client = APIClient()
+
+    url = reverse(
+        "api-internal:alert_receive_channel_template-detail", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+
+    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    templates_data = response.json()
+    assert templates_data["google_calendar_title_template"] == "{{ payload.summary }}"
+    assert templates_data["google_calendar_description_template"] == "{{ payload.description }}"
+
+
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+@pytest.mark.django_db
+def test_update_alert_receive_channel_google_calendar_templates(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(organization, messaging_backends_templates=None)
+    client = APIClient()
+
+    url = reverse(
+        "api-internal:alert_receive_channel_template-detail", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+
+    response = client.put(
+        url,
+        format="json",
+        data={
+            "google_calendar_title_template": "{{ payload.summary }}",
+            "google_calendar_description_template": "{{ payload.description }}",
+        },
+        **make_user_auth_headers(user, token),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    alert_receive_channel.refresh_from_db()
+    assert alert_receive_channel.messaging_backends_templates["GOOGLE_CALENDAR"] == {
+        "title": "{{ payload.summary }}",
+        "description": "{{ payload.description }}",
+    }
+
+
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+@pytest.mark.django_db
+def test_alert_receive_channel_template_include_google_calendar_default_templates(
+    make_organization_and_user_with_plugin_token,
+    make_user_auth_headers,
+    make_alert_receive_channel,
+):
+    organization, user, token = make_organization_and_user_with_plugin_token()
+    alert_receive_channel = make_alert_receive_channel(organization, messaging_backends_templates=None)
+    client = APIClient()
+
+    url = reverse(
+        "api-internal:alert_receive_channel_template-detail", kwargs={"pk": alert_receive_channel.public_primary_key}
+    )
+
+    response = client.get(url, format="json", **make_user_auth_headers(user, token))
+
+    assert response.status_code == status.HTTP_200_OK
+    templates_data = response.json()
+    assert templates_data["google_calendar_title_template"] == alert_receive_channel.get_default_template_attribute(
+        "google_calendar", "title"
+    )
+    assert templates_data["google_calendar_description_template"] == (
+        alert_receive_channel.get_default_template_attribute("google_calendar", "description")
+    )
+
+
 @override_settings(FEATURE_TELEGRAM_INTEGRATION_ENABLED=False)
 @override_settings(FEATURE_SLACK_INTEGRATION_ENABLED=False)
 @pytest.mark.django_db

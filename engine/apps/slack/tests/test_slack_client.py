@@ -1,6 +1,7 @@
 import json
 from contextlib import suppress
 from unittest.mock import patch
+from urllib.error import URLError
 
 import pytest
 from django.utils import timezone
@@ -44,6 +45,20 @@ def test_slack_client_ok(mock_request, monkeypatch, make_organization_with_slack
     client.api_call("auth.test")
 
     mock_request.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_slack_client_transport_error(monkeypatch, make_organization_with_slack_team_identity):
+    monkeypatch.undo()  # undo engine.conftest.mock_slack_api_call
+
+    _, slack_team_identity = make_organization_with_slack_team_identity()
+    client = SlackClient(slack_team_identity)
+
+    with patch("slack_sdk.web.base_client.BaseClient.api_call", side_effect=URLError("ssl failure")):
+        with pytest.raises(SlackAPIServerError) as exc_info:
+            client.api_call("auth.test")
+
+    assert exc_info.value.response == {"status": 503, "headers": {}, "body": "<urlopen error ssl failure>"}
 
 
 @pytest.mark.parametrize("status", [500, 503, 504])

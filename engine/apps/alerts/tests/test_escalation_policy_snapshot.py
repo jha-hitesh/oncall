@@ -1,6 +1,7 @@
 from unittest.mock import call, patch
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone
 
 from apps.alerts.constants import NEXT_ESCALATION_DELAY
@@ -9,6 +10,7 @@ from apps.alerts.escalation_snapshot.snapshot_classes import EscalationPolicySna
 from apps.alerts.escalation_snapshot.utils import eta_for_escalation_step_notify_if_time
 from apps.alerts.models import AlertGroupLogRecord, EscalationPolicy
 from apps.api.permissions import LegacyAccessControlRole
+from apps.google.client import GoogleCalendarRefreshError
 from apps.schedules.ical_utils import list_users_to_notify_from_ical
 from apps.schedules.models import CustomOnCallShift, OnCallScheduleCalendar
 
@@ -743,3 +745,93 @@ def test_escalation_step_declare_incident(
                 log_record.escalation_error_code
                 == AlertGroupLogRecord.ERROR_ESCALATION_DECLARE_INCIDENT_STEP_IS_NOT_ENABLED
             )
+
+
+@patch("apps.alerts.escalation_snapshot.snapshot_classes.escalation_policy_snapshot.GoogleCalendarAPIClient.create_event")
+@pytest.mark.django_db
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+def test_escalation_step_create_calendar_invite_for_current_team_members(
+    mock_create_event,
+    escalation_step_test_setup,
+    make_team,
+    make_escalation_policy,
+):
+    organization, user, _, channel_filter, alert_group, reason = escalation_step_test_setup
+    team = make_team(organization=organization)
+    team.users.add(user)
+    channel_filter.escalation_chain.team = team
+    channel_filter.escalation_chain.save(update_fields=["team"])
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin@example.com",
+        },
+        connected_by=user,
+    )
+    mock_create_event.return_value = {
+        "id": "event-1",
+        "htmlLink": "https://calendar.google.com/event",
+        "hangoutLink": "https://meet.google.com/abc-defg-hij",
+    }
+
+    calendar_invite_step = make_escalation_policy(
+        escalation_chain=channel_filter.escalation_chain,
+        escalation_policy_step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+        invitees=EscalationPolicy.INVITEES_CURRENT_TEAM_MEMBERS,
+    )
+    escalation_policy_snapshot = get_escalation_policy_snapshot_from_model(calendar_invite_step)
+
+    result = escalation_policy_snapshot.execute(alert_group, reason)
+
+    assert result.stop_escalation is False and result.pause_escalation is False and result.start_from_beginning is False
+    mock_create_event.assert_called_once()
+    assert mock_create_event.call_args.kwargs["attendees"] == [user.email]
+    assert calendar_invite_step.log_records.filter(type=AlertGroupLogRecord.TYPE_ESCALATION_TRIGGERED).exists()
+    finished_log = calendar_invite_step.log_records.get(type=AlertGroupLogRecord.TYPE_ESCALATION_FINISHED)
+    assert finished_log.step_specific_info["google_calendar_event_title"]
+    assert finished_log.step_specific_info["google_calendar_meet_link"] == "https://meet.google.com/abc-defg-hij"
+
+
+@patch("apps.alerts.escalation_snapshot.snapshot_classes.escalation_policy_snapshot.GoogleCalendarAPIClient.create_event")
+@pytest.mark.django_db
+@override_settings(GOOGLE_OAUTH2_ENABLED=True)
+def test_escalation_step_create_calendar_invite_refresh_error_disconnects_org(
+    mock_create_event,
+    escalation_step_test_setup,
+    make_team,
+    make_escalation_policy,
+):
+    organization, user, _, channel_filter, alert_group, reason = escalation_step_test_setup
+    team = make_team(organization=organization)
+    team.users.add(user)
+    channel_filter.escalation_chain.team = team
+    channel_filter.escalation_chain.save(update_fields=["team"])
+    organization.save_google_oauth2_organization_settings(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "sub": "google-user-id",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "email": "admin@example.com",
+        },
+        connected_by=user,
+    )
+    mock_create_event.side_effect = GoogleCalendarRefreshError(Exception("expired"))
+
+    calendar_invite_step = make_escalation_policy(
+        escalation_chain=channel_filter.escalation_chain,
+        escalation_policy_step=EscalationPolicy.STEP_CREATE_CALENDAR_INVITE,
+        invitees=EscalationPolicy.INVITEES_CURRENT_TEAM_MEMBERS,
+    )
+    escalation_policy_snapshot = get_escalation_policy_snapshot_from_model(calendar_invite_step)
+
+    result = escalation_policy_snapshot.execute(alert_group, reason)
+    organization.refresh_from_db()
+
+    assert result.stop_escalation is False and result.pause_escalation is False and result.start_from_beginning is False
+    assert organization.has_google_oauth2_organization_connected is False
+    failed_log = calendar_invite_step.log_records.get(type=AlertGroupLogRecord.TYPE_ESCALATION_FAILED)
+    assert failed_log.reason == "Google Calendar connection expired. Reconnect Google Calendar."

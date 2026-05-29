@@ -25,7 +25,12 @@ from apps.chatops_proxy.utils import (
 )
 from apps.grafana_plugin.ui_url_builder import UIURLBuilder
 from apps.slack.installation import install_slack_integration
-from apps.social_auth.backends import SLACK_INSTALLATION_BACKEND, LoginMattermostOAuth2, LoginSlackOAuth2V2
+from apps.social_auth.backends import (
+    SLACK_INSTALLATION_BACKEND,
+    LoginMattermostOAuth2,
+    LoginSlackOAuth2V2,
+    OrganizationGoogleOAuth2,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +107,9 @@ def overridden_complete_social_auth(request: Request, backend: str, *args, **kwa
         # if this was a user login/linking account, redirect to profile (ie. users/me)
         # otherwise it pertains to the InstallSlackOAuth2V2 backend, and we should redirect to the chat-ops page
         return_to = (
-            url_builder.user_profile()
+            url_builder.settings("?tab=GoogleCalendar")
+            if isinstance(request.backend, OrganizationGoogleOAuth2)
+            else url_builder.user_profile()
             if isinstance(request.backend, (LoginMattermostOAuth2, LoginSlackOAuth2V2, GoogleOAuth2))
             else url_builder.chatops()
         )
@@ -115,6 +122,6 @@ def overridden_complete_social_auth(request: Request, backend: str, *args, **kwa
 @never_cache
 @psa("social:disconnect")
 def overridden_disconnect_social_auth(request: Request, backend: str) -> Response:
-    if backend == "google-oauth2":
+    if backend in ("google-oauth2", "google-oauth2-org"):
         do_disconnect(request.backend, request.user)
     return Response("ok", 200)
